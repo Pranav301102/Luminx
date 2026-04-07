@@ -1,0 +1,25 @@
+services:
+  node-b:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: uvicorn node_b:app --host 0.0.0.0 --port 8002
+    environment:
+      - MODEL_NAME=sshleifer/tiny-gpt2
+      - SPLIT_LAYER=2
+    ports:
+      - '8002:8002'
+
+  node-a:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: uvicorn node_a:app --host 0.0.0.0 --port 8001
+    environment:
+      - MODEL_NAME=sshleifer/tiny-gpt2
+      - SPLIT_LAYER=2
+      - NODE_B_URL=http://node-b:8002
+    ports:
+      - '8001:8001'
+    depends_on:
+      - node-b
