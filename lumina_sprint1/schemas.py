@@ -21,3 +21,21 @@ class TailForwardRequest(BaseModel):
 
 class TailForwardResponse(BaseModel):
     generated_token_ids_b64: str
+
+
+class NodeRegisterRequest(BaseModel):
+    node_id: str = Field(..., min_length=1)
+    role: str = Field(..., pattern='^(head|tail)$')
+    vram_gb: float = Field(default=4.0, gt=0)
+    max_layers: int = Field(..., ge=1)
+    total_layers: int = Field(..., ge=2)
+
+
+class NodeHeartbeatRequest(BaseModel):
+    node_id: str = Field(..., min_length=1)
+
+
+class AssignmentResponse(BaseModel):
+    split_layer: int = Field(..., ge=1)
+    total_layers: int = Field(..., ge=2)
+    version: int = Field(..., ge=1)
