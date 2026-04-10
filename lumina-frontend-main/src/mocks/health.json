@@ -1,0 +1,5 @@
+{
+  "tracker_status": "healthy",
+  "inference_api_status": "healthy",
+  "cluster_status": "healthy"
+}

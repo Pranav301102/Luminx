@@ -1,0 +1,14 @@
+{
+  "assignments": [
+    {
+      "node_id": "node-a",
+      "layer_start": 0,
+      "layer_end": 15
+    },
+    {
+      "node_id": "node-b",
+      "layer_start": 16,
+      "layer_end": 31
+    }
+  ]
+}

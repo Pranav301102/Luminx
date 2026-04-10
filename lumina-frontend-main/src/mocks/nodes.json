@@ -1,0 +1,20 @@
+{
+  "nodes": [
+    {
+      "node_id": "node-a",
+      "status": "healthy",
+      "vram": "24 GB",
+      "latency_ms": 12,
+      "throughput_tps": 42,
+      "last_heartbeat": "2026-04-09T10:00:00Z"
+    },
+    {
+      "node_id": "node-b",
+      "status": "healthy",
+      "vram": "16 GB",
+      "latency_ms": 18,
+      "throughput_tps": 33,
+      "last_heartbeat": "2026-04-09T10:00:02Z"
+    }
+  ]
+}

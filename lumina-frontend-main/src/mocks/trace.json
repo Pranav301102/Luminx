@@ -1,0 +1,27 @@
+{
+  "request_id": "req-001",
+  "status": "completed",
+  "total_latency_ms": 842,
+  "steps": [
+    {
+      "name": "prompt_received",
+      "latency_ms": 10
+    },
+    {
+      "name": "tracker_assignment",
+      "latency_ms": 22
+    },
+    {
+      "name": "node_a_forward",
+      "latency_ms": 240
+    },
+    {
+      "name": "node_b_forward",
+      "latency_ms": 370
+    },
+    {
+      "name": "decode_output",
+      "latency_ms": 200
+    }
+  ]
+}
