@@ -17,5 +17,9 @@ class Settings(BaseSettings):
 
     heartbeat_timeout_sec: int = 30
 
+    # Phase 2+: Peer discovery configuration
+    discovery_mode: str = 'static'  # static, mdns, dht
+    seed_peers: str = ''  # Comma-separated host:port list
+
 
 settings = Settings()
