@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   tracker:
     build:
@@ -9,6 +11,14 @@ services:
       - HEARTBEAT_TIMEOUT_SEC=30
     ports:
       - '8003:8003'
+    networks:
+      - lumina
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/assignment"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   node-b:
     build:
@@ -20,10 +30,20 @@ services:
       - SPLIT_LAYER=2
       - TRACKER_URL=http://tracker:8003
       - ENABLE_DYNAMIC_SPLIT=true
+      - NODE_B_ID=node-b
     ports:
       - '8002:8002'
+    networks:
+      - lumina
     depends_on:
-      - tracker
+      tracker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   node-a:
     build:
@@ -36,8 +56,23 @@ services:
       - NODE_B_URL=http://node-b:8002
       - TRACKER_URL=http://tracker:8003
       - ENABLE_DYNAMIC_SPLIT=true
+      - NODE_A_ID=node-a
     ports:
       - '8001:8001'
+    networks:
+      - lumina
     depends_on:
-      - tracker
-      - node-b
+      tracker:
+        condition: service_healthy
+      node-b:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  lumina:
+    driver: bridge
