@@ -14,7 +14,7 @@ services:
     networks:
       - lumina
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/assignment"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/assignment')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -39,7 +39,7 @@ services:
       tracker:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -67,7 +67,7 @@ services:
       node-b:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 10s
       timeout: 5s
       retries: 3

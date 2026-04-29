@@ -78,6 +78,16 @@ def startup() -> None:
     _register_to_tracker()
 
 
+@app.get('/health')
+def health() -> dict:
+    return {
+        'status': 'ok',
+        'model': settings.model_name,
+        'split_layer': settings.split_layer,
+        'total_layers': total_layers,
+    }
+
+
 @app.post('/forward_tail', response_model=TailForwardResponse)
 def forward_tail(request: TailForwardRequest) -> TailForwardResponse:
     _heartbeat_tracker()
