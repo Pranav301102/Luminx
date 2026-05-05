@@ -22,6 +22,12 @@ terraform/*.tfstate.*
 terraform/*.tfstate.backup
 terraform/.terraform.lock.hcl
 terraform/crash.log
+deploy-ec2/.terraform/
+deploy-ec2/*.tfstate
+deploy-ec2/*.tfstate.*
+deploy-ec2/*.tfstate.backup
+deploy-ec2/.terraform.lock.hcl
+deploy-ec2/crash.log
 
 # Docker
 *.tar
