@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  tracker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: uvicorn tracker:app --host 0.0.0.0 --port 8003
+    environment:
+      - SPLIT_LAYER=6
+      - HEARTBEAT_TIMEOUT_SEC=30
+    ports:
+      - '8003:8003'
+    networks:
+      - lumina
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/assignment')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  node-a:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: uvicorn node_a:app --host 0.0.0.0 --port 8001
+    environment:
+      - MODEL_NAME=gpt2
+      - SPLIT_LAYER=6
+      - NODE_B_URL=http://${NODE_B_HOST}:8002
+      - TRACKER_URL=http://tracker:8003
+      - ENABLE_DYNAMIC_SPLIT=true
+      - NODE_A_ID=node-a
+    ports:
+      - '8001:8001'
+    networks:
+      - lumina
+    depends_on:
+      tracker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  lumina:
+    driver: bridge
