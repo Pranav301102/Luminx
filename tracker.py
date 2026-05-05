@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from lumina_sprint1.config import settings
 from lumina_sprint1.schemas import (
@@ -17,6 +18,12 @@ from lumina_sprint1.schemas import (
 from lumina_sprint1.tracker_core import AssignmentManager
 
 app = FastAPI(title='Lumina Sprint1 Tracker')
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 
 manager = AssignmentManager(
     total_layers=4,

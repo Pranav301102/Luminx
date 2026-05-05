@@ -1,6 +1,7 @@
 import torch
 import requests
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from lumina_sprint1.config import settings
@@ -14,6 +15,12 @@ from lumina_sprint1.schemas import (
 from lumina_sprint1.tensor_codec import b64_to_tensor, tensor_to_b64
 
 app = FastAPI(title='Lumina Sprint1 Node A')
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
