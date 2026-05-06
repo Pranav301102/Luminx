@@ -12,7 +12,26 @@
       "Bash(chmod 600 ~/.ssh/luminx-key.pem)",
       "Bash(terraform init:*)",
       "Bash(terraform plan:*)",
-      "Bash(aws configure:*)"
+      "Bash(aws configure:*)",
+      "Bash(ssh *)",
+      "Bash(terraform *)",
+      "Bash(tar.exe -czf project.tar.gz --exclude=project.tar.gz --exclude=venv --exclude=__pycache__ --exclude=.git --exclude=.pytest_cache --exclude=deploy-ec2 --exclude=terraform --exclude=lumina-frontend-main/node_modules --exclude=sprint1 .)",
+      "Bash(scp -i ~/.ssh/luminx-key.pem -o StrictHostKeyChecking=no project.tar.gz \"ec2-user@18.236.230.66:/home/ec2-user/project.tar.gz\")",
+      "Bash(scp -i ~/.ssh/luminx-key.pem -o StrictHostKeyChecking=no project.tar.gz \"ec2-user@18.246.165.53:/home/ec2-user/project.tar.gz\")",
+      "Bash(Remove-Item *)",
+      "Bash(curl *)",
+      "Bash(tar.exe -czf project.tar.gz --exclude=project.tar.gz --exclude=venv --exclude=__pycache__ --exclude=.git --exclude=.pytest_cache --exclude=deploy-ec2 --exclude=terraform --exclude=\"lumina-frontend-main/node_modules\" --exclude=sprint1 .)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(m, p\\) for p,v in d['paths'].items\\(\\) for m in v]\")",
+      "WebFetch(domain:apxml.com)",
+      "Bash(tar czf *)",
+      "Bash(scp -i ~/.ssh/luminx-key.pem -o StrictHostKeyChecking=no /tmp/luminx-deploy.tar.gz ec2-user@18.236.230.66:/home/ec2-user/luminx-deploy.tar.gz)",
+      "Bash(scp -i ~/.ssh/luminx-key.pem -o StrictHostKeyChecking=no /tmp/luminx-deploy.tar.gz ec2-user@18.246.165.53:/home/ec2-user/luminx-deploy.tar.gz)",
+      "Bash(echo \"Monitoring in background, PID=$!\")",
+      "Bash(echo \"Tunnel PID=$!\")",
+      "Bash(Get-Process ssh *)",
+      "Bash(Select-Object Id, StartTime, CPU)",
+      "Bash(npm run *)",
+      "Bash(scp -i ~/.ssh/luminx-key.pem -o StrictHostKeyChecking=no /tmp/frontend-dist.tar.gz ec2-user@18.236.230.66:/home/ec2-user/frontend-dist.tar.gz)"
     ]
   }
 }

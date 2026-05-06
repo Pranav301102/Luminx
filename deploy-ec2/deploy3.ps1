@@ -8,11 +8,12 @@ $ErrorActionPreference = "Stop"
 $TfDir = $PSScriptRoot
 $ProjectDir = (Resolve-Path "$TfDir\..").Path
 
+Write-Host "Applying Terraform changes..."
+terraform -chdir="$TfDir" apply -var="key_pair_name=luminx-key" -auto-approve
+
 Write-Host "Getting Terraform outputs..."
 $cloud1_ip = terraform -chdir="$TfDir" output -raw cloud1_ip
 $cloud2_ip = terraform -chdir="$TfDir" output -raw cloud2_ip
-$cf_bucket = terraform -chdir="$TfDir" output -raw frontend_bucket
-$cf_id     = terraform -chdir="$TfDir" output -raw cloudfront_id
 
 if (-not $cloud1_ip -or $cloud1_ip -match "No outputs found") {
     Write-Error "Terraform outputs not found. Did you run terraform apply?"
@@ -21,13 +22,19 @@ if (-not $cloud1_ip -or $cloud1_ip -match "No outputs found") {
 Write-Host "Cloud 1: $cloud1_ip"
 Write-Host "Cloud 2: $cloud2_ip"
 Write-Host "Local Node B: ${LocalIp}:8002"
-Write-Host "S3 bucket: $cf_bucket"
+
+Write-Host "Building React frontend..."
+Set-Location "$ProjectDir\lumina-frontend-main"
+$env:VITE_API_BASE_URL = "http://${cloud1_ip}:8001"
+$env:VITE_TRACKER_BASE_URL = "http://${cloud1_ip}:8003"
+npm install
+npm run build
 
 Write-Host "Packaging project..."
 Set-Location $ProjectDir
 # Use Windows 10/11 built-in tar.exe to avoid WSL/rsync complexities
 tar.exe -czf project.tar.gz --exclude=project.tar.gz `
-    --exclude=.venv --exclude=__pycache__ --exclude=.git `
+    --exclude=venv --exclude=__pycache__ --exclude=.git `
     --exclude=.pytest_cache --exclude=deploy-ec2 --exclude=terraform `
     --exclude=lumina-frontend-main/node_modules --exclude=sprint1 .
 
@@ -45,21 +52,21 @@ ssh -i "$SshKey" -o StrictHostKeyChecking=no ec2-user@${cloud2_ip} "sudo curl -S
 Write-Host "Cleaning up local archive..."
 Remove-Item project.tar.gz
 
-Write-Host "Building React frontend..."
-Set-Location "$ProjectDir\lumina-frontend-main"
-$env:VITE_API_BASE_URL = "http://${cloud1_ip}:8001"
-$env:VITE_TRACKER_BASE_URL = "http://${cloud1_ip}:8003"
-npm install
-npm run build
-
-Write-Host "Uploading to S3..."
-aws s3 sync dist/ "s3://${cf_bucket}/" --delete
-
-Write-Host "Invalidating CloudFront cache..."
-aws cloudfront create-invalidation --distribution-id $cf_id --paths "/*" --query 'Invalidation.Id' --output text
-
 Write-Host "Deployment complete!"
-Write-Host "Next step - start Node B on your LOCAL machine:"
-Write-Host "`$env:TRACKER_URL=`"http://${cloud1_ip}:8003`""
+Write-Host "================================================"
+Write-Host "Your Frontend is available at: http://${cloud1_ip}"
+Write-Host "================================================"
+Write-Host ""
+Write-Host "Next step - start Node B on your LOCAL machine natively:"
+Write-Host "Run the following commands in your PowerShell:"
+Write-Host ""
+Write-Host "`$env:MODEL_NAME=`"microsoft/Phi-4-mini-instruct`""
+Write-Host "`$env:SPLIT_LAYER_A=`"10`""
+Write-Host "`$env:SPLIT_LAYER_B=`"21`""
+Write-Host "`$env:SPLIT_LAYER=`"10`""
 Write-Host "`$env:NODE_C_URL=`"http://${cloud2_ip}:8004`""
-Write-Host "docker compose -f docker-compose.local.yml up -d --build"
+Write-Host "`$env:TRACKER_URL=`"http://${cloud1_ip}:8003`""
+Write-Host "`$env:ENABLE_DYNAMIC_SPLIT=`"true`""
+Write-Host "`$env:NODE_B_ID=`"node-b`""
+Write-Host ".\venv\Scripts\python -m uvicorn node_b:app --host 0.0.0.0 --port 8002"
+Write-Host ""
