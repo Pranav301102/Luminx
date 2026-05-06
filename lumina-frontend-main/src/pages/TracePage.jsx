@@ -59,14 +59,7 @@ export default function TracePage() {
         <pre>{trace ? JSON.stringify(trace, null, 2) : "No trace loaded."}</pre>
       </div>
 
-      <div className="card">
-        <h3>Integration Notes</h3>
-        <ul>
-          <li>TODO(Person 2): confirm final trace event names.</li>
-          <li>TODO(Person 1): confirm inference-stage latency fields.</li>
-          <li>TODO(Person 2): confirm failover / retry event visibility for Phase 3.</li>
-        </ul>
-      </div>
+
     </div>
   );
 }
