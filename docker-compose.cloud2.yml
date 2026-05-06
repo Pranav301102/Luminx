@@ -1,0 +1,36 @@
+version: '3.8'
+
+# Cloud 2 (t4g.large ARM): Node C (tail)
+# Deploy with:
+#   TRACKER_URL=http://<cloud1_ip>:8003 \
+#   docker compose -f docker-compose.cloud2.yml up -d --build
+
+services:
+  node-c:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    platform: linux/arm64
+    command: uvicorn node_c:app --host 0.0.0.0 --port 8004
+    environment:
+      - MODEL_NAME=microsoft/Phi-4-mini-instruct
+      - SPLIT_LAYER_A=10
+      - SPLIT_LAYER_B=21
+      - SPLIT_LAYER=10
+      - TRACKER_URL=${TRACKER_URL:-http://localhost:8003}
+      - ENABLE_DYNAMIC_SPLIT=true
+      - NODE_C_ID=node-c
+    ports:
+      - '8004:8004'
+    networks:
+      - lumina
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+networks:
+  lumina:
+    driver: bridge

@@ -1,0 +1,64 @@
+version: '3.8'
+
+# Cloud 1 (t4g.large ARM): Node A (head) + Tracker
+# Deploy with:
+#   NODE_B_URL=http://<home_public_ip>:8002 \
+#   NODE_C_URL=http://<cloud2_ip>:8004 \
+#   docker compose -f docker-compose.cloud1.yml up -d --build
+
+services:
+  tracker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    platform: linux/arm64
+    command: uvicorn tracker:app --host 0.0.0.0 --port 8003
+    environment:
+      - SPLIT_LAYER=10
+      - SPLIT_LAYER_A=10
+      - SPLIT_LAYER_B=21
+      - HEARTBEAT_TIMEOUT_SEC=30
+    ports:
+      - '8003:8003'
+    networks:
+      - lumina
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/assignment')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  node-a:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    platform: linux/arm64
+    command: uvicorn node_a:app --host 0.0.0.0 --port 8001
+    environment:
+      - MODEL_NAME=microsoft/Phi-4-mini-instruct
+      - SPLIT_LAYER_A=10
+      - SPLIT_LAYER_B=21
+      - SPLIT_LAYER=10
+      - NODE_B_URL=${NODE_B_URL:-http://localhost:8002}
+      - NODE_C_URL=${NODE_C_URL:-http://localhost:8004}
+      - TRACKER_URL=http://tracker:8003
+      - ENABLE_DYNAMIC_SPLIT=true
+      - NODE_A_ID=node-a
+    ports:
+      - '8001:8001'
+    networks:
+      - lumina
+    depends_on:
+      tracker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 120s  # model download on first run takes time
+
+networks:
+  lumina:
+    driver: bridge

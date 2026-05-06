@@ -1,0 +1,49 @@
+version: '3.8'
+
+# Local machine (NVIDIA GPU): Node B (middle)
+# Prerequisites:
+#   1. Install nvidia-container-toolkit on the host
+#   2. Port-forward :8002 on your router to this machine's LAN IP
+# Deploy with:
+#   TRACKER_URL=http://<cloud1_ip>:8003 \
+#   NODE_C_URL=http://<cloud2_ip>:8004 \
+#   docker compose -f docker-compose.local.yml up -d --build
+
+services:
+  node-b:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    platform: linux/amd64
+    command: uvicorn node_b:app --host 0.0.0.0 --port 8002
+    environment:
+      - MODEL_NAME=microsoft/Phi-4-mini-instruct
+      - SPLIT_LAYER_A=10
+      - SPLIT_LAYER_B=21
+      - SPLIT_LAYER=10
+      - NODE_C_URL=${NODE_C_URL:-http://localhost:8004}
+      - TRACKER_URL=${TRACKER_URL:-http://localhost:8003}
+      - ENABLE_DYNAMIC_SPLIT=true
+      - NODE_B_ID=node-b
+    ports:
+      - '8002:8002'
+    # GPU passthrough — requires nvidia-container-toolkit
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - lumina
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+networks:
+  lumina:
+    driver: bridge
