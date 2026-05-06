@@ -1,6 +1,6 @@
 # Lumina — Distributed Split Inference
 
-Lumina runs a language model across two separate machines by splitting its transformer layers between them. Instead of one machine running the entire model, a **Tracker** dynamically assigns how many layers each node handles based on available VRAM.
+Lumina runs a language model across two machines by splitting the transformer layers between them. Rather than having one machine handle the entire model, a Tracker dynamically decides how many layers each node should run based on its available VRAM.
 
 ## How It Works
 
