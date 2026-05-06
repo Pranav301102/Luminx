@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc:*)",
+      "Bash(wc -l /c/Users/prana/Luminx/lumina-frontend-main/src/**/*.jsx)",
+      "WebSearch",
+      "Bash(python:*)",
+      "Bash(git:*)"
+    ]
+  }
+}
