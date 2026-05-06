@@ -27,14 +27,14 @@ services:
       - NODE_B_ID=node-b
     ports:
       - '8002:8002'
-    # GPU passthrough — requires nvidia-container-toolkit
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # GPU passthrough — requires nvidia-container-toolkit (Command disabled due to WSL GPU error)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
     networks:
       - lumina
     healthcheck:

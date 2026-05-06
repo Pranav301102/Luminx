@@ -36,6 +36,7 @@ data "aws_ami" "al2023_arm" {
 # ── Security groups ───────────────────────────────────────────────────────────
 
 resource "aws_security_group" "cloud1" {
+  vpc_id = "vpc-007f7ee473c624b03"
   name        = "luminx-cloud1"
   description = "Node A (head) + Tracker"
 
@@ -72,6 +73,7 @@ resource "aws_security_group" "cloud1" {
 }
 
 resource "aws_security_group" "cloud2" {
+  vpc_id = "vpc-007f7ee473c624b03"
   name        = "luminx-cloud2"
   description = "Node C (tail)"
 
