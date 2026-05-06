@@ -10,7 +10,7 @@ import gc
 
 import torch
 import torch.nn as nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM
 
 
 def _is_phi3_style(model: nn.Module) -> bool:
@@ -126,15 +126,57 @@ def prune_to_range(model: nn.Module, keep_start: int, keep_end: int) -> None:
     gc.collect()
 
 
+def make_device_map(model_name: str, keep_start: int, keep_end: int, target_device: str) -> dict | str:
+    """Create a device map that loads unused layers to 'meta' to save RAM."""
+    config = AutoConfig.from_pretrained(model_name)
+    
+    device_map = {"": target_device}
+    
+    if hasattr(config, 'num_hidden_layers'):
+        prefix = "model.layers"
+        num_layers = config.num_hidden_layers
+    elif hasattr(config, 'n_layer'):
+        prefix = "transformer.h"
+        num_layers = config.n_layer
+    else:
+        # Cannot safely infer layers, return 'auto' fallback
+        return 'auto'
+        
+    for i in range(num_layers):
+        if not (keep_start <= i < keep_end):
+            device_map[f"{prefix}.{i}"] = "meta"
+            
+    # Optionally drop embeddings/lm_head for mid/tail nodes to save more memory
+    if keep_start > 0:
+        if prefix == "model.layers":
+            device_map["model.embed_tokens"] = "meta"
+        elif prefix == "transformer.h":
+            device_map["transformer.wte"] = "meta"
+            device_map["transformer.wpe"] = "meta"
+            
+    if keep_end < num_layers:
+        if prefix == "model.layers":
+            device_map["lm_head"] = "meta"
+            device_map["model.norm"] = "meta"
+        elif prefix == "transformer.h":
+            device_map["lm_head"] = "meta"
+            device_map["transformer.ln_f"] = "meta"
+            
+    return device_map
+
+
 def load_model_for_node(model_name: str, keep_start: int, keep_end: int):
     """Load model with appropriate precision and prune to assigned layer range.
 
     On CUDA machines: uses int8 quantization via bitsandbytes when available,
-    otherwise fp16. On CPU machines: uses fp16 with low_cpu_mem_usage.
+    otherwise fp16. On CPU machines: uses fp16.
 
     Returns (model, device).
     """
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = torch.device(device_name)
+    
+    device_map = make_device_map(model_name, keep_start, keep_end, device_name)
 
     if torch.cuda.is_available():
         try:
@@ -142,19 +184,19 @@ def load_model_for_node(model_name: str, keep_start: int, keep_end: int):
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 load_in_8bit=True,
-                device_map='auto',
+                device_map=device_map,
             )
         except (ImportError, RuntimeError):
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 torch_dtype=torch.float16,
-                device_map='auto',
+                device_map=device_map,
             )
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.float16,
-            low_cpu_mem_usage=True,
+            device_map=device_map,
         )
 
     model.eval()
