@@ -1,3 +1,6 @@
+import threading
+import time
+
 import torch
 import requests
 from fastapi import FastAPI, HTTPException
@@ -53,7 +56,7 @@ def _register_to_tracker() -> None:
         role='head',
         vram_gb=_estimate_vram_gb(),
         max_layers=settings.split_layer_a,
-        total_layers=32,  # Phi-4 Mini total
+        total_layers=28,  # Qwen2.5-1.5B total
     )
     try:
         requests.post(f'{settings.tracker_url}/register', json=payload.model_dump(), timeout=5)
@@ -95,9 +98,16 @@ def run_head(input_ids: torch.Tensor) -> torch.Tensor:
     return run_all_layers(model, hidden_states, layer_kwargs)
 
 
+def _heartbeat_loop() -> None:
+    while True:
+        time.sleep(20)
+        _heartbeat_tracker()
+
+
 @app.on_event('startup')
 def startup() -> None:
     _register_to_tracker()
+    threading.Thread(target=_heartbeat_loop, daemon=True).start()
 
 
 @app.get('/health')
@@ -136,6 +146,7 @@ def generate(request: GenerateRequest) -> GenerateResponse:
                 f'{settings.node_b_url}/forward_mid',
                 json=payload.model_dump(),
                 timeout=60,
+                headers={'bypass-tunnel-reminder': 'true'},
             )
             response.raise_for_status()
         except requests.RequestException as exc:

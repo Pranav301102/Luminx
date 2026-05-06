@@ -1,3 +1,6 @@
+import threading
+import time
+
 import torch
 import requests
 from fastapi import FastAPI
@@ -33,7 +36,7 @@ app.add_middleware(
 model, device = load_model_for_node(
     settings.model_name,
     keep_start=settings.split_layer_b,
-    keep_end=32,
+    keep_end=28,
 )
 
 
@@ -50,8 +53,8 @@ def _register_to_tracker() -> None:
         node_id=settings.node_c_id,
         role='tail',
         vram_gb=_estimate_vram_gb(),
-        max_layers=32 - settings.split_layer_b,
-        total_layers=32,
+        max_layers=28 - settings.split_layer_b,
+        total_layers=28,
     )
     try:
         requests.post(f'{settings.tracker_url}/register', json=payload.model_dump(), timeout=5)
@@ -79,9 +82,16 @@ def run_tail(hidden_states: torch.Tensor, seq_len: int) -> torch.Tensor:
     return next_token
 
 
+def _heartbeat_loop() -> None:
+    while True:
+        time.sleep(20)
+        _heartbeat_tracker()
+
+
 @app.on_event('startup')
 def startup() -> None:
     _register_to_tracker()
+    threading.Thread(target=_heartbeat_loop, daemon=True).start()
 
 
 @app.get('/health')
