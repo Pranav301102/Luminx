@@ -81,15 +81,6 @@ export default function ClusterPage() {
           </tbody>
         </table>
       </div>
-
-      <div className="card">
-        <h3>Integration Notes</h3>
-        <ul>
-          <li>TODO(Person 2): confirm final node scoring fields from backend.</li>
-          <li>TODO(Person 2): confirm heartbeat freshness threshold for UI warnings.</li>
-          <li>TODO(Person 2): confirm if cluster updates use polling, SSE, or WebSocket.</li>
-        </ul>
-      </div>
     </div>
   );
 }
