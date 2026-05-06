@@ -9,7 +9,7 @@ export default function useStreamGenerate() {
     setStreamText("");
 
     try {
-      const response = await fetch("http://localhost:8000/generate/stream", {
+      const response = await fetch("/generate/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -1,4 +1,4 @@
-import client from "./client";
+import axios from "axios";
 import mockNodes from "../mocks/nodes.json";
 import mockAssignments from "../mocks/assignments.json";
 
@@ -6,6 +6,11 @@ import mockAssignments from "../mocks/assignments.json";
 // true  -> use local mock JSON files
 // false -> use live backend APIs
 const USE_MOCKS = false;
+
+const trackerClient = axios.create({
+  baseURL: import.meta.env.VITE_TRACKER_BASE_URL || "",
+  timeout: 10000,
+});
 
 /**
  * Fetch all available compute nodes from the backend tracker service.
@@ -44,7 +49,7 @@ export async function fetchNodes() {
   // Live backend endpoint that returns current node information
   // and health status from the distributed system tracker.
   try {
-    const response = await client.get("/nodes/list");
+    const response = await trackerClient.get("/nodes/list");
 
     // Return backend JSON response data
     return response.data;
@@ -86,7 +91,7 @@ export async function fetchAssignments() {
   // Live backend endpoint that returns active
   // distributed layer allocation information.
   try {
-    const response = await client.get("/assignments/current");
+    const response = await trackerClient.get("/assignments/current");
 
     // Return assignment data from backend
     return response.data;

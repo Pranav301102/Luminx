@@ -6,7 +6,7 @@ import StatusBadge from "../components/common/StatusBadge";
 export default function ClusterPage() {
   const { nodes, assignments, loading, error } = useNodePolling(3000);
 
-  const activeNodes = nodes.filter((node) => node.status === "healthy");
+  const activeNodes = nodes.filter((node) => node.status === "active" || node.status === "healthy");
 
   return (
     <div className="page-section">

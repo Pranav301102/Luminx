@@ -2,8 +2,15 @@ const LOG_KEY = "lumina_frontend_logs";
 const MAX_LOGS = 150;
 
 export function addFrontendLog(level, message, metadata = {}) {
+  // Fallback for non-HTTPS environments where crypto.randomUUID is undefined
+  const generateId = () => {
+    return typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  };
+
   const log = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     level,
     message,
     metadata,

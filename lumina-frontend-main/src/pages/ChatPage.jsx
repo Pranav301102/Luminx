@@ -53,7 +53,7 @@ export default function ChatPage() {
 
         // Display the generated output if available.
         // If not, show the full JSON response for debugging.
-        setResponseText(result.output || JSON.stringify(result, null, 2));
+        setResponseText(result.generated_text || result.output || JSON.stringify(result, null, 2));
       }
     } catch (err) {
       // Log the full error for debugging in the browser console
@@ -82,10 +82,12 @@ export default function ChatPage() {
 
       {/* Prompt input form */}
       <form className="card" onSubmit={handleSubmit}>
-        <label className="input-label">Prompt</label>
+        <label className="input-label" htmlFor="prompt-input">Prompt</label>
 
         {/* Text area where the user enters a prompt */}
         <textarea
+          id="prompt-input"
+          name="prompt"
           rows="7"
           placeholder="Enter prompt here..."
           value={prompt}
@@ -94,8 +96,10 @@ export default function ChatPage() {
 
         <div className="controls-row">
           {/* Streaming mode toggle */}
-          <label className="checkbox-row">
+          <label className="checkbox-row" htmlFor="stream-mode-checkbox">
             <input
+              id="stream-mode-checkbox"
+              name="streamMode"
               type="checkbox"
               checked={streamMode}
               onChange={(e) => setStreamMode(e.target.checked)}

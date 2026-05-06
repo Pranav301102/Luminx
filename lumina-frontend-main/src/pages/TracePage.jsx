@@ -41,8 +41,10 @@ export default function TracePage() {
       <ErrorBanner message={error} />
 
       <form className="card" onSubmit={handleLookup}>
-        <label className="input-label">Request ID</label>
+        <label className="input-label" htmlFor="request-id-input">Request ID</label>
         <input
+          id="request-id-input"
+          name="requestId"
           type="text"
           placeholder="Enter request ID"
           value={requestId}
