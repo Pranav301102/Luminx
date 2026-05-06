@@ -58,7 +58,6 @@
   \IEEEauthorblockA{
     \textit{Department of Computer Engineering, San Jose State University}\\
     San Jose, CA, USA\\
-    ekant.kapgate@sjsu.edu
   }
 }
 
@@ -95,11 +94,12 @@ service discovery, dynamic configuration, AWS, Terraform, FastAPI, PyTorch
 
 The rapid growth of large language models (LLMs) has created a significant
 resource barrier for practitioners operating outside hyperscale cloud
-environments. GPT-2~\cite{radford2019gpt2}, the model used in this work,
-requires approximately 500\,MB of memory for its 117 million
-parameters---modest by modern standards, yet representative of the
-architectural challenge: as models scale to billions of parameters, a single
-consumer GPU is insufficient to host the entire model graph.
+environments. Qwen2.5-1.5B-Instruct~\cite{qwen2025}, the model used in this work,
+has 28 transformer layers and 1.5 billion parameters. Even at this relatively
+modest scale, fully loading the model on a single CPU machine requires several
+gigabytes of RAM—a constraint that worsens as models grow. As models scale to
+tens of billions of parameters, a single consumer GPU is entirely insufficient
+to host the complete model graph.
 
 \emph{Split inference}---the practice of partitioning a neural network's
 computational graph across multiple devices---has emerged as a practical
@@ -107,13 +107,14 @@ response to this constraint~\cite{kang2017neurosurgeon}. Rather than requiring
 a monolithic accelerator, split inference allows organizations to aggregate the
 capacity of multiple commodity machines, each hosting a shard of the model.
 
-Lumina implements a two-node split inference pipeline for the GPT-2
-transformer architecture. The system is designed around enterprise distributed
-systems principles: services are independently deployable, communicate via
-versioned REST APIs, self-register with a coordination service, and expose
-health and observability endpoints. The project serves as a proof-of-concept
-for distributed LLM inference deployable on AWS EC2 instances without
-specialized networking or GPU hardware.
+Lumina implements a three-node split inference pipeline. Node~A (head) runs
+layers 0--8, Node~B (mid) runs layers 9--18, and Node~C (tail) runs layers
+19--27 plus the final normalization and language model head. The system is
+designed around enterprise distributed systems principles: services are
+independently deployable, communicate via versioned REST APIs, self-register
+with a coordination service, and expose health and observability endpoints.
+The project serves as a proof-of-concept for distributed LLM inference
+deployable on commodity hardware without specialized networking or GPUs.
 
 The key contributions of this work are:
 
@@ -127,9 +128,9 @@ The key contributions of this work are:
         base64-encoded HTTP, requiring no custom RPC infrastructure.
   \item A complete Infrastructure-as-Code deployment (Terraform + Docker)
         targeting AWS EC2 and AWS Fargate.
-  \item A memory-aware model loading strategy using per-layer \texttt{device\_map}
-        assignments that maps unused transformer layers to PyTorch's \texttt{meta}
-        device, eliminating peak RAM from non-executing weights.
+  \item A memory-aware model loading strategy that reads only each node's
+        assigned layer slice directly from safetensors shards, using a
+        \texttt{meta}-device skeleton so unused weights are never materialized.
   \item An observability frontend providing real-time cluster state, generation
         chat, request trace visualization, and a client-side structured log
         viewer backed by \texttt{localStorage}.
@@ -179,78 +180,101 @@ serialization infrastructure and operates over standard HTTP/1.1.
 % ─────────────────────────────────────────────────────────────────────────────
 \section{System Architecture}
 
-Lumina comprises four independently deployed components: Node~A (head),
-Node~B (tail), the Tracker coordination service, and a React frontend
-dashboard. Figure~\ref{fig:arch} illustrates the high-level system
-architecture.
+Lumina comprises five independently deployed components: Node~A (head),
+Node~B (mid), Node~C (tail), the Tracker coordination service, and a React
+frontend dashboard. Figure~\ref{fig:arch} illustrates the high-level system
+architecture. The model (Qwen2.5-1.5B-Instruct, 28 layers) is partitioned
+across the three inference nodes with a default split of 9/10/9 layers.
 
 % ── System Architecture Diagram ──────────────────────────────────────────────
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
 \begin{tikzpicture}[
-  node distance=0.5cm,
-  box/.style={rectangle, rounded corners=3pt, draw, text width=3.6cm,
-              minimum height=0.85cm, align=center, font=\small},
-  arrow/.style={-{Stealth[length=4pt]}, thick},
-  darrow/.style={-{Stealth[length=4pt]}, thick, dashed},
+  node distance=0.5cm and 1.4cm,
+  box/.style={rectangle, rounded corners=4pt, draw, text width=3.0cm,
+              minimum height=1.0cm, align=center, font=\small},
+  wide/.style={rectangle, rounded corners=4pt, draw, text width=4.0cm,
+               minimum height=1.0cm, align=center, font=\small},
+  arrow/.style={-{Stealth[length=5pt]}, thick},
+  darrow/.style={-{Stealth[length=5pt]}, thick, dashed},
   lbl/.style={font=\scriptsize\itshape, fill=white, inner sep=1pt}
 ]
 
-% Vertical stack: Frontend -> Client -> Node A -> Node B
-%                                              -> Tracker (right of Node B)
+% Top row: Frontend  Client
+\node[box, fill=purple!12] (fe)     {React Frontend\\{\footnotesize port 80}};
+\node[box, fill=gray!15,   right=of fe] (client) {Client / Browser};
 
-\node[box, fill=purple!12]  (fe)     {React Frontend\\{\footnotesize port 80}};
-\node[box, fill=gray!15,    below=of fe]     (client) {Client / Browser};
-\node[box, fill=blue!15,    below=of client] (nodea)
+% Inference chain (horizontal)
+\node[box, fill=blue!15,   right=of client] (nodea)
   {\textbf{Node A} (Head)\\{\footnotesize port 8001}\\
-   {\tiny layers 0$\to$split, tokenize}};
-\node[box, fill=green!15,   below=of nodea]  (nodeb)
-  {\textbf{Node B} (Tail)\\{\footnotesize port 8002}\\
-   {\tiny layers split$\to$12, return token}};
-\node[box, fill=orange!20,  right=1.2cm of nodea] (tracker)
-  {\textbf{Tracker}\\{\footnotesize port 8003}\\
-   {\tiny VRAM split, heartbeat}};
+   {\tiny layers 0--8, tokenize}};
+\node[box, fill=teal!15,   right=of nodea]  (nodeb)
+  {\textbf{Node B} (Mid)\\{\footnotesize port 8002}\\
+   {\tiny layers 9--18}};
+\node[box, fill=green!15,  right=of nodeb]  (nodec)
+  {\textbf{Node C} (Tail)\\{\footnotesize port 8004}\\
+   {\tiny layers 19--27, lm\_head}};
 
-% Arrows
-\draw[arrow]  (fe)     -- node[lbl, right]{/generate, /nodes} (client);
-\draw[arrow]  (client) -- node[lbl, right]{POST /generate}    (nodea);
-\draw[arrow]  (nodea)  -- node[lbl, right]{hidden states (b64)} (nodeb);
-\draw[darrow] (nodeb)  -- node[lbl, left] {next token}
-              ([xshift=-6pt]nodeb.north) -- ([xshift=-6pt]nodea.south);
-\draw[darrow] (nodea.east) -- node[lbl, above]{GET /assignment}
-              node[lbl, below]{POST /heartbeat} (tracker.west);
-\draw[darrow] (nodeb.east) -| node[lbl, right, near end]{POST /register}
-              (tracker.south);
+% Tracker below the chain
+\node[wide, fill=orange!20, below=1.0cm of nodeb] (tracker)
+  {\textbf{Tracker} (port 8003)\\
+   {\footnotesize VRAM split \textbar{} heartbeat \textbar{} traces}};
+
+% Data flow arrows
+\draw[arrow] (fe)     -- node[lbl, above]{/generate} (client);
+\draw[arrow] (client) -- node[lbl, above]{POST /generate} (nodea);
+\draw[arrow] (nodea)  -- node[lbl, above]{\scriptsize hidden (b64)} (nodeb);
+\draw[arrow] (nodeb)  -- node[lbl, above]{\scriptsize hidden (b64)} (nodec);
+
+% Return path: next token back to Node A (below the chain)
+\draw[darrow] (nodec.south) -- ++(0,-0.45)
+              -- node[lbl, below]{next token} ++(-9.8,0)
+              -- (nodea.south);
+
+% Heartbeat / register arrows to Tracker
+\draw[darrow] (nodea.south) |- node[lbl, right, near end]{heartbeat} (tracker.west);
+\draw[darrow] (nodeb.south) -- node[lbl, right]{register/heartbeat} (tracker.north);
+\draw[darrow] (nodec.south) |- node[lbl, left, near end]{register} (tracker.east);
 
 \end{tikzpicture}
-\caption{Lumina system architecture. Solid arrows: data flow. Dashed arrows:
-control/registration flow.}
+\caption{Lumina 3-node split inference architecture. The inference pipeline flows
+left to right: Node~A tokenizes the prompt and runs layers 0--8, Node~B relays
+layers 9--18, and Node~C runs layers 19--27 and returns the next token.
+All nodes send periodic heartbeats to the Tracker, which maintains the dynamic
+split assignment. Solid arrows: data flow; dashed arrows: control/registration flow.}
 \label{fig:arch}
-\end{figure}
+\end{figure*}
 
 \subsection{Node A --- Head Service}
 
 Node~A serves as the system's public inference endpoint. On receipt of a
 \texttt{POST /generate} request, it tokenizes the input prompt and initiates
-an autoregressive generation loop. For each token position, it executes the
-head portion of the GPT-2 transformer: the token embedding layer, positional
-embedding, dropout, and the first \texttt{split\_layer} transformer blocks.
-The resulting hidden-state tensor is serialized and forwarded to Node~B.
+an autoregressive generation loop. For each token position it runs the token
+embedding, positional embedding, and transformer layers 0--8 of the
+Qwen2.5-1.5B model. The resulting hidden-state tensor is base64-encoded and
+forwarded to Node~B via \texttt{POST /forward\_mid}.
 
-Before each token step, Node~A queries the Tracker's \texttt{/assignment}
-endpoint to obtain the current \texttt{split\_layer} value. This per-token
-querying ensures the system responds immediately to any rebalancing event
-triggered by a change in node composition.
+Node~A also consults the Tracker's \texttt{/assignment} endpoint at the start
+of each generate call to refresh the current split boundaries
+(\texttt{split\_layer\_a}, \texttt{split\_layer\_b}). A background daemon
+thread heartbeats the Tracker every 20~s independently of incoming requests,
+ensuring liveness is maintained even during idle periods.
 
-\subsection{Node B --- Tail Service}
+\subsection{Node B --- Middle Service}
 
-Node~B exposes a single inference endpoint: \texttt{POST /forward\_tail}. It
-receives the serialized hidden states along with the current
-\texttt{split\_layer} index, executes the remaining transformer blocks
-(\texttt{split\_layer} through layer~11), applies the final layer normalization
+Node~B exposes \texttt{POST /forward\_mid}. It receives hidden states from
+Node~A, runs transformer layers 9--18, and immediately forwards the resulting
+hidden states to Node~C via \texttt{POST /forward\_tail}. Node~B maintains no
+generation state; it is a pure compute relay. Like all nodes it runs a
+background heartbeat thread every 20~s.
+
+\subsection{Node C --- Tail Service}
+
+Node~C exposes \texttt{POST /forward\_tail}. It receives hidden states from
+Node~B, runs transformer layers 19--27, applies the final layer normalization
 and language model head, and returns the argmax next token as a base64-encoded
-tensor. Node~B maintains no generation state---all context tracking is
-handled by Node~A.
+tensor. All autoregressive context (token IDs, attention mask) is tracked
+exclusively by Node~A; Node~C is stateless across requests.
 
 \subsection{Tracker --- Coordination Service}
 
@@ -286,10 +310,12 @@ executes on every heartbeat event.
 \end{algorithm}
 
 A node is considered stale if its \texttt{last\_seen} timestamp exceeds
-\texttt{heartbeat\_timeout\_sec} (default: 30~s). When both active nodes are
-present, the split layer is computed proportionally to their VRAM. A version
-counter increments on every split change, allowing clients to detect assignment
-drift without maintaining local state.
+\texttt{heartbeat\_timeout\_sec} (120~s in cloud deployments, 30~s default).
+The extended timeout accommodates the slow model-load startup time on CPU-only
+instances. When all three active nodes are present, split boundaries are
+computed proportionally to VRAM. A version counter increments on every split
+change, allowing clients to detect assignment drift without maintaining local
+state.
 
 \subsection{Frontend Dashboard}
 
@@ -347,70 +373,78 @@ autoregressive loop in Node~A as shown in Listing~\ref{lst:loop}.
 
 \begin{lstlisting}[caption={Autoregressive generation loop in Node A.}, label={lst:loop}]
 for _ in range(max_new_tokens):
-    split = resolve_split_layer()
-    hidden = run_head(ids, mask, split)
-    payload = TailForwardRequest(
-        hidden_states_b64=encode(hidden),
-        split_layer=split, ...)
-    resp = POST(node_b_url, payload)
-    next_tok = decode(resp.token_ids_b64)
+    hidden = run_head(ids)       # layers 0-8
+    payload = MidForwardRequest(
+        hidden_states_b64=encode(hidden), ...)
+    # Node B runs layers 9-18, then calls Node C
+    # Node C runs layers 19-27, returns next token
+    resp = POST(node_b_url + "/forward_mid", payload)
+    next_tok = decode(resp.generated_token_ids_b64)
     ids = cat([ids, next_tok], dim=1)
     if next_tok == eos_token:
         break
 \end{lstlisting}
 
-This design means generation latency scales linearly with token count, with
-each token incurring the full serialization and network transfer overhead. For
-a 20-token generation, the system performs 20 HTTP round trips between
-nodes---a deliberate tradeoff that keeps the implementation simple while
-validating the core tensor transport contract.
+Each token requires two chained HTTP hops: Node~A~$\to$~Node~B~$\to$~Node~C.
+Node~B acts as a relay, immediately forwarding its output to Node~C without
+returning to Node~A. This keeps the critical path at two round trips per token
+rather than three, while preserving the stateless relay design. For a 20-token
+generation, the system performs 40 HTTP requests in total across the three
+nodes.
 
 \subsection{Service Self-Registration}
 
-Both Node~A and Node~B register themselves with the Tracker on FastAPI startup
-via the \texttt{on\_event('startup')} hook. The registration payload includes
-the node's unique identifier, role designation, estimated VRAM, maximum layer
-capacity, and total model layer count. This self-registration pattern eliminates
-the need for static configuration files and allows new nodes to join the
-cluster without restarting existing services.
+All three inference nodes (Node~A, Node~B, Node~C) register with the Tracker
+on FastAPI startup via the \texttt{on\_event('startup')} hook. The registration
+payload includes the node's unique identifier, role (\texttt{head},
+\texttt{mid}, or \texttt{tail}), estimated VRAM, maximum layer capacity, and
+total model layer count. After registration, each node starts a background
+daemon thread that sends a heartbeat to the Tracker every 20~s,
+independently of any incoming inference requests. This self-registration
+pattern eliminates the need for static configuration files and allows new
+nodes to join the cluster without restarting existing services.
 
 \subsection{Memory-Aware Model Loading}
 
-A key challenge in split inference is that loading the full model on each node
-wastes the RAM of layers that will never execute. The
-\texttt{model\_adapter} module addresses this with a \texttt{make\_device\_map}
-function that constructs a per-layer device map before model loading. Layers
-outside the node's assigned range \texttt{[keep\_start, keep\_end)} are mapped
-to the \texttt{meta} device---a PyTorch virtual device that holds parameter
-shapes but allocates no memory---while active layers are mapped to the real
-compute device (CUDA or CPU).
+Loading the full Qwen2.5-1.5B model on every node would require $\sim$3\,GB
+of RAM per instance before any computation. Since each node executes only a
+fraction of the layers, this is wasteful. The \texttt{model\_adapter} module
+implements \texttt{\_load\_slice\_cpu}, which loads only the tensors needed by
+each node's layer slice, reading directly from HuggingFace safetensors shards.
 
-\begin{lstlisting}[caption={Selective layer device mapping in \texttt{model\_adapter.py}.}, label={lst:devmap}]
-def make_device_map(model_name, keep_start,
-                    keep_end, target_device):
-    config = AutoConfig.from_pretrained(model_name)
-    device_map = {"": target_device}
-    prefix = "transformer.h"   # GPT-2 layer prefix
-    for i in range(config.n_layer):
-        if not (keep_start <= i < keep_end):
-            device_map[f"{prefix}.{i}"] = "meta"
-    # Drop embeddings on tail nodes, lm_head on head
-    if keep_start > 0:
-        device_map["transformer.wte"] = "meta"
-        device_map["transformer.wpe"] = "meta"
-    if keep_end < config.n_layer:
-        device_map["lm_head"] = "meta"
-        device_map["transformer.ln_f"] = "meta"
-    return device_map
+The procedure has three steps. First, a full model skeleton is instantiated
+on PyTorch's \texttt{meta} device---a virtual device that holds tensor shapes
+and dtypes but allocates no physical memory. Second, the function inspects the
+model's \texttt{model.safetensors.index.json} to locate which shards contain
+the needed parameters, determined by the node's \texttt{[keep\_start,
+keep\_end)} range and its role:
+
+\begin{lstlisting}[caption={Selective safetensors loading in \texttt{\_load\_slice\_cpu}.}, label={lst:devmap}]
+def _is_needed(param_name):
+    # Layer slice: only [keep_start, keep_end)
+    if param_name.startswith(prefix + '.'):
+        idx = int(param_name.split('.')[layer_idx_pos])
+        return keep_start <= idx < keep_end
+    # Embeddings: head node only
+    if 'embed_tokens' in param_name:
+        return is_head
+    # LM head + final norm: tail node only
+    if param_name.startswith('lm_head.'):
+        return is_tail
+    return True
 \end{lstlisting}
 
-This approach replaces the previous \texttt{prune\_to\_range} post-load pruning
-strategy, which required loading the full model before discarding unused layers.
-By passing the device map directly to \texttt{AutoModelForCausalLM.from\_pretrained},
-unused weights are never materialized, reducing peak RAM consumption
-proportionally to the fraction of layers assigned to each node. For a 12-layer
-GPT-2 split 6/6, each node loads only half the transformer blocks plus its
-required embeddings or head weights.
+Third, only the qualifying tensors are read from disk via \texttt{safe\_open}
+and inserted into the skeleton with \texttt{load\_state\_dict(assign=True)},
+which replaces \texttt{meta} tensors with real CPU tensors in-place. For a
+9/10/9 split across 28 layers, each node materializes roughly one-third of the
+model weights. On CUDA nodes the standard \texttt{device\_map='auto'} path is
+used instead, as accelerate handles VRAM placement efficiently.
+
+An additional fix was required for Qwen2 models: their rotary embedding
+(\texttt{inv\_freq}) buffer is left on the \texttt{meta} device after
+skeleton construction. \texttt{\_ensure\_qwen2\_rotary\_buffers} detects this
+and reconstructs the buffer from the model config before any forward pass.
 
 \subsection{Health and Observability}
 
@@ -428,11 +462,20 @@ memory growth.
 
 \subsection{Containerization Strategy}
 
-All three backend services share a single Docker image built from a
-\texttt{python:3.11-slim} base. The \texttt{command:} directive in each
-docker-compose service definition selects which uvicorn application to launch.
-Docker Compose health checks enforce a strict startup order: the Tracker must
-be healthy before Node~B starts, and both must be healthy before Node~A starts.
+All backend services share a single Docker image. The \texttt{command:}
+directive in each Compose service definition selects which uvicorn application
+to launch. Three Compose files cover the deployment scenarios:
+\texttt{docker-compose.cloud1.yml} runs the Tracker, Node~A, and the nginx
+frontend on the head machine; \texttt{docker-compose.cloud2.yml} runs Node~C
+on a second cloud instance; and \texttt{docker-compose.local.yml} runs Node~B
+on a local or on-premise machine. Node~A is given a \texttt{mem\_limit} of
+15\,GB with 16\,GB of swap to accommodate the full model load time.
+\texttt{start\_period} for health checks is set to 600\,s to allow the model
+to download and load into RAM before the container is declared healthy.
+\texttt{HF\_HUB\_ENABLE\_HF\_TRANSFER=1} is set to accelerate HuggingFace
+downloads. The nginx frontend service is co-located on the head machine,
+serving the pre-built React static assets via a mounted \texttt{dist/}
+directory.
 
 \subsection{AWS EC2 Deployment}
 
@@ -524,55 +567,55 @@ resolution. Solid arrows: data flow; dashed: control; dotted: infrastructure.}
 
 \subsection{Functional Validation}
 
-The system was validated end-to-end on AWS EC2 (\texttt{t3.small}, CPU-only)
-using the GPT-2 model (12 transformer layers, 117M parameters). Functional
-correctness was confirmed by verifying that text generated via the split
-pipeline is identical to single-node generation with the same prompt and random
-seed. The autoregressive loop correctly terminates on EOS token detection.
+The system was validated end-to-end using Qwen2.5-1.5B-Instruct (28
+transformer layers, 1.5B parameters) across three nodes. Functional correctness
+was confirmed by verifying that text generated via the three-node split pipeline
+produces coherent completions. The autoregressive loop correctly terminates on
+EOS token detection, and the rotary embedding buffers are correctly reconstructed
+on CPU nodes via \texttt{\_ensure\_qwen2\_rotary\_buffers}.
 
 \subsection{Latency Profile}
 
-On CPU-only \texttt{t3.small} instances, end-to-end generation latency for a
-20-token prompt is dominated by transformer forward passes rather than
-serialization overhead. The tensor transport pipeline
+The tensor transport pipeline
 (\texttt{torch.save} $\to$ base64 encode $\to$ HTTP POST $\to$ base64 decode
-$\to$ \texttt{torch.load}) adds approximately 15--40\,ms per token for GPT-2
-hidden states (shape: $[1, L, 768]$ where $L$ is sequence length). Per-token
-inference time on CPU is approximately 200--400\,ms, making serialization
-overhead a secondary concern in this hardware configuration.
+$\to$ \texttt{torch.load}) is executed twice per token (A$\to$B and B$\to$C).
+Hidden state tensors for Qwen2.5-1.5B have shape $[1, L, 1536]$ (hidden
+dimension 1536), roughly double that of GPT-2. Per-token inference time on
+CPU-only instances is significantly higher, making network serialization a
+smaller fraction of total latency.
 
-The primary performance observation is that autoregressive generation requires
-$\mathcal{O}(N)$ network round trips for $N$ tokens. Let $T_{\text{head}}$,
-$T_{\text{serial}}$, $T_{\text{net}}$, and $T_{\text{tail}}$ denote the time
-for head inference, serialization, network transfer, and tail inference
-respectively. The total generation latency for $N$ tokens is:
+With the three-node chain, total generation latency for $N$ tokens extends
+the two-node formula to include the mid-node:
 
 \begin{equation}
-  T_{\text{total}} = N \cdot \left(T_{\text{head}} + T_{\text{serial}}
-                     + T_{\text{net}} + T_{\text{tail}}\right)
+  T_{\text{total}} = N \cdot \left(T_A + T_{AB} + T_B + T_{BC} + T_C\right)
   \label{eq:latency}
 \end{equation}
 
+where $T_A$, $T_B$, $T_C$ are per-node inference times and $T_{AB}$,
+$T_{BC}$ are the serialization + network costs for each hop.
+
 \subsection{Dynamic Split Behavior}
 
-With two \texttt{t3.small} instances reporting equal VRAM (4.0\,GB each, the
-CPU fallback value), the Tracker assigns \texttt{split\_layer}~$= 6$, exactly
-halving the 12 GPT-2 layers. When a node registers with a larger VRAM value
-(simulated in unit tests), the split shifts proportionally. The version counter
-correctly detects changes, allowing Node~A to detect stale assignments without
-maintaining local state.
+With three nodes reporting equal VRAM (4.0\,GB each, the CPU fallback),
+the Tracker assigns the 28 layers evenly: \texttt{split\_layer\_a}~$= 9$,
+\texttt{split\_layer\_b}~$= 18$, giving a 9/9/10 distribution. The cloud
+deployment uses a fixed 9/10/9 split via environment variables. The version
+counter correctly detects boundary changes, allowing Node~A to refresh its
+assignment without maintaining local state.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Enterprise Considerations}
 
 \subsection{Microservices Architecture}
 
-Lumina's three backend services map cleanly onto the microservices decomposition
+Lumina's four backend services map cleanly onto the microservices decomposition
 pattern~\cite{newman2021microservices}. Each service owns a distinct
-responsibility: Node~A orchestrates generation, Node~B performs computation,
-and the Tracker manages coordination. Services communicate exclusively via
-well-defined REST APIs with Pydantic-validated request/response schemas,
-ensuring contract stability as individual services evolve independently.
+responsibility: Node~A orchestrates generation, Node~B relays mid-layer
+computation, Node~C produces final tokens, and the Tracker manages
+coordination. Services communicate exclusively via well-defined REST APIs with
+Pydantic-validated request/response schemas, ensuring contract stability as
+individual services evolve independently.
 
 \subsection{Service Discovery Pattern}
 
@@ -606,8 +649,10 @@ unacceptable for interactive inference.
 
 Three fault tolerance mechanisms are implemented. First, the heartbeat timeout:
 nodes that fail silently are detected within \texttt{heartbeat\_timeout\_sec}
-(30~s) and removed from the active assignment. Second, the fallback split
-layer: when no active tail node is registered, the Tracker returns the static
+(120~s in cloud deployments) and removed from the active assignment; the
+background heartbeat thread in each node ensures liveness signals continue
+even during idle periods. Second, the fallback split layer: when no active
+tail node is registered, the Tracker returns the static
 \texttt{fallback\_split\_layer}, preventing Node~A from blocking. Third,
 Node~A's generate endpoint wraps the Node~B HTTP call in a try/except block,
 returning HTTP~502 with a descriptive error rather than an unhandled exception.
@@ -845,6 +890,11 @@ E.~Brewer,
 C.~Sridharan,
 \textit{Distributed Systems Observability}.
 Sebastopol, CA: O'Reilly Media, 2018.
+
+\bibitem{qwen2025}
+Qwen Team,
+``Qwen2.5: A Party of Foundation Models,''
+\textit{arXiv preprint arXiv:2412.15115}, 2025.
 
 \end{thebibliography}
 
