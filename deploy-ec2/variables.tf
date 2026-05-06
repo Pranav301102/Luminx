@@ -5,9 +5,9 @@ variable "aws_region" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type. Free-tier eligible options: t3.small (2GB), t3.micro (1GB), c7i-flex.large (4GB), m7i-flex.large (8GB)"
+  description = "EC2 instance type for inference nodes. t4g.large = ARM Graviton2, 2 vCPU, 8 GB RAM, CPU-only (~$0.067/hr)."
   type        = string
-  default     = "t3.small"
+  default     = "t4g.large"
 }
 
 variable "key_pair_name" {
@@ -16,7 +16,13 @@ variable "key_pair_name" {
 }
 
 variable "your_ip_cidr" {
-  description = "Your public IP in CIDR notation (e.g. 1.2.3.4/32). Restricts SSH and API access to your IP only."
+  description = "Your public IP in CIDR notation (e.g. 1.2.3.4/32). Restricts SSH access to your IP only."
   type        = string
   default     = "0.0.0.0/0"
+}
+
+variable "cloudfront_price_class" {
+  description = "CloudFront price class. PriceClass_100 = US/EU only (cheapest). PriceClass_All = global."
+  type        = string
+  default     = "PriceClass_100"
 }

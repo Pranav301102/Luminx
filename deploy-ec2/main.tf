@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -12,15 +16,15 @@ provider "aws" {
   region = var.aws_region
 }
 
-# ── Latest Amazon Linux 2023 AMI ─────────────────────────────────────────────
+# ── Latest Amazon Linux 2023 AMI (ARM64 for t4g) ─────────────────────────────
 
-data "aws_ami" "al2023" {
+data "aws_ami" "al2023_arm" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["al2023-ami-*-arm64"]
   }
 
   filter {
@@ -31,9 +35,9 @@ data "aws_ami" "al2023" {
 
 # ── Security groups ───────────────────────────────────────────────────────────
 
-resource "aws_security_group" "head" {
-  name        = "luminx-head"
-  description = "Node A + Tracker"
+resource "aws_security_group" "cloud1" {
+  name        = "luminx-cloud1"
+  description = "Node A (head) + Tracker"
 
   ingress {
     description = "SSH"
@@ -44,7 +48,7 @@ resource "aws_security_group" "head" {
   }
 
   ingress {
-    description = "Node A API (public)"
+    description = "Node A /generate API (public)"
     from_port   = 8001
     to_port     = 8001
     protocol    = "tcp"
@@ -52,7 +56,7 @@ resource "aws_security_group" "head" {
   }
 
   ingress {
-    description = "Tracker (from Node B)"
+    description = "Tracker API (public — nodes + frontend poll this)"
     from_port   = 8003
     to_port     = 8003
     protocol    = "tcp"
@@ -67,9 +71,9 @@ resource "aws_security_group" "head" {
   }
 }
 
-resource "aws_security_group" "tail" {
-  name        = "luminx-tail"
-  description = "Node B"
+resource "aws_security_group" "cloud2" {
+  name        = "luminx-cloud2"
+  description = "Node C (tail)"
 
   ingress {
     description = "SSH"
@@ -80,9 +84,9 @@ resource "aws_security_group" "tail" {
   }
 
   ingress {
-    description = "Node B (from Node A)"
-    from_port   = 8002
-    to_port     = 8002
+    description = "Node C /forward_tail (from Node B local + Cloud 1)"
+    from_port   = 8004
+    to_port     = 8004
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -95,83 +99,38 @@ resource "aws_security_group" "tail" {
   }
 }
 
-resource "aws_security_group" "frontend" {
-  name        = "luminx-frontend"
-  description = "Frontend nginx"
+# ── EC2 instances (t4g.large ARM — CPU only, no GPU) ─────────────────────────
 
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.your_ip_cidr]
-  }
-
-  ingress {
-    description = "HTTP (public)"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# ── EC2 instances ─────────────────────────────────────────────────────────────
-
-resource "aws_instance" "head" {
-  ami                         = data.aws_ami.al2023.id
+resource "aws_instance" "cloud1" {
+  ami                         = data.aws_ami.al2023_arm.id
   instance_type               = var.instance_type
   key_name                    = var.key_pair_name
-  vpc_security_group_ids      = [aws_security_group.head.id]
+  vpc_security_group_ids      = [aws_security_group.cloud1.id]
   associate_public_ip_address = true
 
   root_block_device {
-    volume_size = 20
+    volume_size = 30  # extra space for model weights cache
     volume_type = "gp3"
   }
 
   user_data = file("${path.module}/user_data.sh")
 
-  tags = { Name = "luminx-head", Project = "luminx" }
+  tags = { Name = "luminx-cloud1", Project = "luminx", Role = "head+tracker" }
 }
 
-resource "aws_instance" "tail" {
-  ami                         = data.aws_ami.al2023.id
+resource "aws_instance" "cloud2" {
+  ami                         = data.aws_ami.al2023_arm.id
   instance_type               = var.instance_type
   key_name                    = var.key_pair_name
-  vpc_security_group_ids      = [aws_security_group.tail.id]
+  vpc_security_group_ids      = [aws_security_group.cloud2.id]
   associate_public_ip_address = true
 
   root_block_device {
-    volume_size = 20
+    volume_size = 30
     volume_type = "gp3"
   }
 
   user_data = file("${path.module}/user_data.sh")
 
-  tags = { Name = "luminx-tail", Project = "luminx" }
-}
-
-resource "aws_instance" "frontend" {
-  ami                         = data.aws_ami.al2023.id
-  instance_type               = "t3.micro"
-  key_name                    = var.key_pair_name
-  vpc_security_group_ids      = [aws_security_group.frontend.id]
-  associate_public_ip_address = true
-
-  root_block_device {
-    volume_size = 8
-    volume_type = "gp3"
-  }
-
-  user_data = file("${path.module}/user_data_frontend.sh")
-
-  tags = { Name = "luminx-frontend", Project = "luminx" }
+  tags = { Name = "luminx-cloud2", Project = "luminx", Role = "tail" }
 }
