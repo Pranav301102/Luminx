@@ -56,7 +56,7 @@ resource "aws_security_group" "cloud1" {
   }
 
   ingress {
-    description = "Tracker API (public — nodes + frontend poll this)"
+      description = "Tracker API (public - nodes + frontend poll this)"
     from_port   = 8003
     to_port     = 8003
     protocol    = "tcp"

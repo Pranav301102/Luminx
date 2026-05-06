@@ -5,7 +5,14 @@
       "Bash(wc -l /c/Users/prana/Luminx/lumina-frontend-main/src/**/*.jsx)",
       "WebSearch",
       "Bash(python:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(aws sts:*)",
+      "Bash(aws ec2:*)",
+      "Bash(curl -s https://checkip.amazonaws.com)",
+      "Bash(chmod 600 ~/.ssh/luminx-key.pem)",
+      "Bash(terraform init:*)",
+      "Bash(terraform plan:*)",
+      "Bash(aws configure:*)"
     ]
   }
 }
