@@ -13,6 +13,7 @@ export default function Sidebar() {
         <NavLink to="/cluster">Cluster</NavLink>
         <NavLink to="/health">Health</NavLink>
         <NavLink to="/trace">Trace</NavLink>
+        <NavLink to="/logs">Logs</NavLink>
       </nav>
     </aside>
   );

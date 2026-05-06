@@ -19,8 +19,14 @@ const USE_MOCKS = false;
  *       vram,
  *       max_layers,
  *       status,
+ *       cpu_percent,
+ *       ram_percent,
+ *       ram_used_gb,
+ *       ram_total_gb,
  *       latency_ms,
  *       throughput_tps,
+ *       active_connections,
+ *       shared_with,
  *       last_heartbeat
  *     }
  *   ]
@@ -54,7 +60,7 @@ export async function fetchNodes() {
   }
 }
 
-e/**
+/**
  * Fetch current model layer assignments for all active nodes.
  * 
  * Backend response format:

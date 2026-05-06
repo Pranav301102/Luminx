@@ -11,7 +11,10 @@ export default function HealthPage() {
       <div className="page-title-row">
         <div>
           <h2>Health</h2>
-          <p>Monitor global service health and readiness.</p>
+          <p>
+            Monitor global service health, readiness, active nodes,
+            and cluster activity.
+          </p>
         </div>
       </div>
 
@@ -22,18 +25,48 @@ export default function HealthPage() {
         <>
           <div className="card">
             <h3>System Overview</h3>
+
             <div className="stats-grid">
               <div className="stat-box">
                 <span className="stat-label">Tracker</span>
                 <StatusBadge status={data.tracker_status} />
               </div>
+
               <div className="stat-box">
                 <span className="stat-label">Inference API</span>
                 <StatusBadge status={data.inference_api_status} />
               </div>
+
               <div className="stat-box">
                 <span className="stat-label">Cluster</span>
                 <StatusBadge status={data.cluster_status} />
+              </div>
+
+              <div className="stat-box">
+                <span className="stat-label">Active Nodes</span>
+                <strong>
+                  {data.active_nodes !== undefined
+                    ? data.active_nodes
+                    : "N/A"}
+                </strong>
+              </div>
+
+              <div className="stat-box">
+                <span className="stat-label">Total Nodes</span>
+                <strong>
+                  {data.total_nodes !== undefined
+                    ? data.total_nodes
+                    : "N/A"}
+                </strong>
+              </div>
+
+              <div className="stat-box">
+                <span className="stat-label">Data Sharing Links</span>
+                <strong>
+                  {data.data_sharing_links !== undefined
+                    ? data.data_sharing_links
+                    : "N/A"}
+                </strong>
               </div>
             </div>
           </div>
