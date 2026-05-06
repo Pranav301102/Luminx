@@ -1,20 +1,25 @@
 import torch
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from lumina_sprint1.config import settings
-from lumina_sprint1.model_adapter import load_model_for_node, make_layer_kwargs, run_all_layers, total_layer_count
+from lumina_sprint1.model_adapter import (
+    get_logits,
+    load_model_for_node,
+    make_layer_kwargs,
+    run_all_layers,
+    total_layer_count,
+)
 from lumina_sprint1.schemas import (
-    MidForwardRequest,
-    MidForwardResponse,
     NodeHeartbeatRequest,
     NodeRegisterRequest,
     TailForwardRequest,
+    TailForwardResponse,
 )
 from lumina_sprint1.tensor_codec import b64_to_tensor, tensor_to_b64
 
-app = FastAPI(title='Luminx Node B — Middle')
+app = FastAPI(title='Luminx Node C — Tail')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=['*'],
@@ -23,11 +28,12 @@ app.add_middleware(
 )
 
 # ── Model loading ─────────────────────────────────────────────────────────────
-# Load only layers [split_layer_a, split_layer_b) assigned to this middle node.
+# Load only layers [split_layer_b, total) plus final norm + lm_head.
+# total_layers=32 for Phi-4 Mini.
 model, device = load_model_for_node(
     settings.model_name,
-    keep_start=settings.split_layer_a,
-    keep_end=settings.split_layer_b,
+    keep_start=settings.split_layer_b,
+    keep_end=32,
 )
 
 
@@ -41,10 +47,10 @@ def _register_to_tracker() -> None:
     if not settings.enable_dynamic_split:
         return
     payload = NodeRegisterRequest(
-        node_id=settings.node_b_id,
-        role='mid',
+        node_id=settings.node_c_id,
+        role='tail',
         vram_gb=_estimate_vram_gb(),
-        max_layers=settings.split_layer_b - settings.split_layer_a,
+        max_layers=32 - settings.split_layer_b,
         total_layers=32,
     )
     try:
@@ -56,7 +62,7 @@ def _register_to_tracker() -> None:
 def _heartbeat_tracker() -> None:
     if not settings.enable_dynamic_split:
         return
-    payload = NodeHeartbeatRequest(node_id=settings.node_b_id)
+    payload = NodeHeartbeatRequest(node_id=settings.node_c_id)
     try:
         requests.post(f'{settings.tracker_url}/heartbeat', json=payload.model_dump(), timeout=5)
     except requests.RequestException:
@@ -64,10 +70,13 @@ def _heartbeat_tracker() -> None:
 
 
 @torch.inference_mode()
-def run_mid(hidden_states: torch.Tensor, seq_len: int) -> torch.Tensor:
-    """Run all layers in the pruned middle model."""
+def run_tail(hidden_states: torch.Tensor, seq_len: int) -> torch.Tensor:
+    """Run final layers, apply norm + lm_head, return next token id."""
     layer_kwargs = make_layer_kwargs(model, seq_len, device)
-    return run_all_layers(model, hidden_states, layer_kwargs)
+    hidden_states = run_all_layers(model, hidden_states, layer_kwargs)
+    logits = get_logits(model, hidden_states)
+    next_token = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
+    return next_token
 
 
 @app.on_event('startup')
@@ -80,40 +89,19 @@ def health() -> dict:
     return {
         'status': 'ok',
         'model': settings.model_name,
-        'split_layer_a': settings.split_layer_a,
         'split_layer_b': settings.split_layer_b,
         'node_layers': total_layer_count(model),
     }
 
 
-@app.post('/forward_mid', response_model=MidForwardResponse)
-def forward_mid(request: MidForwardRequest) -> MidForwardResponse:
-    """Receive hidden states from Node A, run middle layers, forward to Node C."""
+@app.post('/forward_tail', response_model=TailForwardResponse)
+def forward_tail(request: TailForwardRequest) -> TailForwardResponse:
+    """Receive hidden states from Node B, run final layers, return next token."""
     _heartbeat_tracker()
 
     token_ids = b64_to_tensor(request.token_ids_b64, device=device).long()
     hidden_states = b64_to_tensor(request.hidden_states_b64, device=device).to(device)
     seq_len = token_ids.shape[1]
 
-    mid_output = run_mid(hidden_states, seq_len)
-
-    # Forward to Node C
-    tail_payload = TailForwardRequest(
-        token_ids_b64=request.token_ids_b64,
-        attention_mask_b64=request.attention_mask_b64,
-        hidden_states_b64=tensor_to_b64(mid_output),
-        max_new_tokens=request.max_new_tokens,
-    )
-
-    try:
-        response = requests.post(
-            f'{settings.node_c_url}/forward_tail',
-            json=tail_payload.model_dump(),
-            timeout=60,
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f'Node C unavailable: {exc}') from exc
-
-    body = response.json()
-    return MidForwardResponse(generated_token_ids_b64=body['generated_token_ids_b64'])
+    next_token = run_tail(hidden_states, seq_len)
+    return TailForwardResponse(generated_token_ids_b64=tensor_to_b64(next_token))
