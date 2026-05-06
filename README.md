@@ -1,6 +1,6 @@
 # Lumina — Distributed Split Inference
 
-Lumina runs a language model across two machines by splitting the transformer layers between them. Rather than having one machine handle the entire model, a Tracker dynamically decides how many layers each node should run based on its available VRAM.
+Lumina runs a large language model across three physically separate machines by splitting its transformer layers between them. A **Tracker** service dynamically recalculates the optimal split boundaries at runtime based on each node's available VRAM, distributing the assignment via a versioned REST API.
 
 ## How It Works
 
@@ -8,70 +8,99 @@ Lumina runs a language model across two machines by splitting the transformer la
 Client
   │
   ▼ POST /generate
-┌─────────────────────────────┐
-│  Node A  (port 8001)        │  ← Head layers (0 → split_layer)
-│  Tokenizes prompt           │
-│  Runs first N blocks        │
-│  Serializes hidden states   │
-└──────────────┬──────────────┘
-               │ POST /forward_tail (base64 tensor)
+┌──────────────────────────────┐
+│  Node A — Head  (port 8001)  │  layers  0 →  8  (tokenize + embed)
+└──────────────┬───────────────┘
+               │ POST /forward_mid  (base64 hidden states)
                ▼
-┌─────────────────────────────┐
-│  Node B  (port 8002)        │  ← Tail layers (split_layer → end)
-│  Runs remaining blocks      │
-│  Applies ln_f + lm_head     │
-│  Returns next token         │
-└─────────────────────────────┘
+┌──────────────────────────────┐
+│  Node B — Mid   (port 8002)  │  layers  9 → 18  (relay node)
+└──────────────┬───────────────┘
+               │ POST /forward_tail (base64 hidden states)
+               ▼
+┌──────────────────────────────┐
+│  Node C — Tail  (port 8004)  │  layers 19 → 27 + ln_f + lm_head
+│  Returns next token (b64)    │
+└──────────────────────────────┘
 
-Both nodes register/heartbeat with:
+All three nodes register and heartbeat with:
 
-┌─────────────────────────────┐
-│  Tracker  (port 8003)       │
-│  Monitors node health       │
-│  Computes optimal split     │
-│  Exposes /assignment        │
-└─────────────────────────────┘
+┌──────────────────────────────┐
+│  Tracker        (port 8003)  │
+│  Monitors node health        │
+│  Computes split boundaries   │
+│  Exposes /assignment         │
+└──────────────────────────────┘
 ```
 
-The split point is recalculated on every heartbeat proportional to each node's VRAM:
+Split boundaries are recalculated on every heartbeat proportional to each node's VRAM:
 ```
-split_layer = round((node_a_vram / total_vram) * total_layers)
+split_layer_a = round((vram_a / total_vram) * total_layers)
+split_layer_b = split_layer_a + round((vram_b / total_vram) * total_layers)
 ```
+
+Default cloud split: **9 / 10 / 9** across 28 layers (Qwen2.5-1.5B-Instruct).
+
+### Memory-Aware Model Loading
+
+Each node loads **only the layers it will execute** — unused weights are never materialized. On CPU, `model_adapter._load_slice_cpu` builds a full model skeleton on PyTorch's `meta` device (zero RAM), then reads only the needed tensors directly from HuggingFace safetensors shards via `safe_open`, inserting them in-place with `load_state_dict(assign=True)`.
+
+```
+Node A loads:  embed_tokens + layers  0– 8               (~⅓ model)
+Node B loads:  layers  9–18                               (~⅓ model)
+Node C loads:  layers 19–27 + final norm + lm_head        (~⅓ model)
+```
+
+On CUDA, the standard `device_map='auto'` path is used.
+
+**Supported architectures:** Qwen2 / Qwen2-MoE · GPT-2 family · Phi-3 / Phi-4 Mini (auto-detected from model config).
+
+### Background Heartbeat
+
+Each node starts a **daemon thread on startup** that sends a heartbeat to the Tracker every **20 seconds**, independent of inference traffic. This ensures the Tracker's liveness registry stays current even during idle periods.
 
 ## Project Layout
 
 ```
 lumina_sprint1/
-├── config.py          # pydantic-settings config (env vars / .env)
-├── schemas.py         # shared Pydantic request/response models
-├── tensor_codec.py    # tensor ↔ base64 serialization
-└── tracker_core.py    # AssignmentManager — split logic + request traces
+├── config.py           # pydantic-settings config (env vars / .env)
+├── model_adapter.py    # safetensors slice loader, layer helpers, Qwen2 RoPE fix
+├── schemas.py          # shared Pydantic request/response models
+├── tensor_codec.py     # tensor ↔ base64 serialization
+├── tracker_core.py     # AssignmentManager — split logic + request traces
+└── discovery.py        # service discovery helpers
 
-node_a.py              # Head node — /generate endpoint
-node_b.py              # Tail node — /forward_tail endpoint
-tracker.py             # Tracker service
-docker-compose.yml     # Single-machine local dev (all 3 services)
-docker-compose.head.yml  # Head instance (Node A + Tracker)
-docker-compose.tail.yml  # Tail instance (Node B only)
-docker/Dockerfile      # Single image used by all services
-deploy-ec2/            # EC2 deployment (dev/demo)
-terraform/             # AWS Fargate deployment (production)
-lumina-frontend-main/  # React dashboard
+node_a.py                    # Head node  — POST /generate
+node_b.py                    # Mid node   — POST /forward_mid
+node_c.py                    # Tail node  — POST /forward_tail
+tracker.py                   # Tracker service
+docker-compose.cloud1.yml    # Cloud machine 1: Tracker + Node A + nginx frontend
+docker-compose.cloud2.yml    # Cloud machine 2: Node C (tail, ARM t4g.large)
+docker-compose.local.yml     # Local/on-prem machine: Node B (mid, NVIDIA GPU)
+docker/Dockerfile            # Single image used by all services
+lumina-frontend-main/
+├── nginx.conf               # nginx reverse-proxy config (proxies /generate, /nodes/, etc.)
+└── src/                     # React + Vite dashboard
+deploy-ec2/                  # EC2 Terraform + deploy scripts
+terraform/                   # AWS Fargate production deployment
+scratch/                     # Test scripts (test_qwen.py, test_load.py, etc.)
 ```
 
 ## Prerequisites
 
 - Python 3.11+
 - Docker + Docker Compose
+- `safetensors` and `huggingface_hub` Python packages (in `requirements.txt`)
 
-## Local Run (single machine)
+## Running Locally (single machine, tiny model)
 
 ```bash
 pip install -r requirements.txt
+# Uses sshleifer/tiny-gpt2 by default — lightweight pipeline smoke-test
 docker compose up --build
 ```
 
-Test it:
+Test:
 ```bash
 curl -X POST http://localhost:8001/generate \
   -H 'Content-Type: application/json' \
@@ -83,132 +112,137 @@ Run tests:
 pytest -q
 ```
 
+## Cloud Deployment (3-machine split, Qwen2.5-1.5B)
+
+The production topology splits across three machines:
+
+| Machine | Compose file | Services | Notes |
+|---------|-------------|----------|-------|
+| Cloud 1 (ARM t4g.large) | `docker-compose.cloud1.yml` | Tracker · Node A · nginx frontend | `NODE_B_URL`, `NODE_C_URL` injected at deploy time |
+| Cloud 2 (ARM t4g.large) | `docker-compose.cloud2.yml` | Node C (tail) | `TRACKER_URL` injected |
+| Local / on-prem (NVIDIA) | `docker-compose.local.yml`  | Node B (mid)  | `TRACKER_URL`, `NODE_C_URL` injected |
+
+**Deploy Cloud 1 (head + tracker + frontend):**
+```bash
+NODE_B_URL=http://<local_public_ip>:8002 \
+NODE_C_URL=http://<cloud2_ip>:8004 \
+docker compose -f docker-compose.cloud1.yml up -d --build
+```
+
+**Deploy Cloud 2 (tail):**
+```bash
+TRACKER_URL=http://<cloud1_ip>:8003 \
+docker compose -f docker-compose.cloud2.yml up -d --build
+```
+
+**Deploy Node B locally (mid):**
+```bash
+TRACKER_URL=http://<cloud1_ip>:8003 \
+NODE_C_URL=http://<cloud2_ip>:8004 \
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+Or use the PowerShell helper on Windows:
+```powershell
+.\start-node-b.ps1
+```
+
+> **Note:** First startup downloads Qwen2.5-1.5B from HuggingFace (~3 GB). Health check `start_period` is set to **600 s** to accommodate this. `HF_HUB_ENABLE_HF_TRANSFER=1` is set for faster downloads.
+
 ## Configuration
 
 All settings are read from environment variables or a `.env` file:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_NAME` | `sshleifer/tiny-gpt2` | HuggingFace model |
-| `SPLIT_LAYER` | `2` | Fallback split layer index |
+| `MODEL_NAME` | `microsoft/Phi-4-mini-instruct` | HuggingFace model |
+| `SPLIT_LAYER_A` | `10` | Head/mid boundary (Node A runs layers 0→A) |
+| `SPLIT_LAYER_B` | `21` | Mid/tail boundary (Node B runs layers A→B) |
+| `SPLIT_LAYER` | `10` | Backward-compat alias for `SPLIT_LAYER_A` |
 | `NODE_B_URL` | `http://localhost:8002` | Node B address (used by Node A) |
+| `NODE_C_URL` | `http://localhost:8004` | Node C address (used by Node B) |
 | `TRACKER_URL` | `http://localhost:8003` | Tracker address |
-| `ENABLE_DYNAMIC_SPLIT` | `true` | Let tracker override split layer |
-| `NODE_A_ID` / `NODE_B_ID` | `node-a` / `node-b` | Node identifiers |
-| `HEARTBEAT_TIMEOUT_SEC` | `30` | Seconds before a node is marked stale |
+| `ENABLE_DYNAMIC_SPLIT` | `true` | Let tracker override split boundaries |
+| `NODE_A_ID` / `NODE_B_ID` / `NODE_C_ID` | `node-a/b/c` | Node identifiers |
+| `HEARTBEAT_TIMEOUT_SEC` | `30` | Stale threshold (120 s in cloud compose) |
 
 ## API Reference
 
-### Node A
+### Node A (Head) — port 8001
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Node status, model, split layer |
+| `GET` | `/health` | Status, model, split_layer_a/b, loaded layer count |
 | `POST` | `/generate` | Generate text — `{"prompt": "...", "max_new_tokens": 20}` |
 
-### Node B
+### Node B (Mid) — port 8002
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Node status, model, total layers |
-| `POST` | `/forward_tail` | Run tail layers on received hidden states |
+| `GET` | `/health` | Status, model, split_layer_a/b, loaded layer count |
+| `POST` | `/forward_mid` | Receive hidden states from Node A, forward output to Node C |
 
-### Tracker
+### Node C (Tail) — port 8004
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/assignment` | Current split layer + version |
+| `GET` | `/health` | Status, model, split_layer_b, loaded layer count |
+| `POST` | `/forward_tail` | Run final layers, return next token as base64 tensor |
+
+### Tracker — port 8003
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/assignment` | Current split boundaries + version |
 | `GET` | `/nodes/list` | All registered nodes and their status |
 | `GET` | `/assignments/current` | Layer ranges assigned per node |
 | `POST` | `/register` | Register a node with VRAM + layer capacity |
 | `POST` | `/heartbeat` | Refresh a node's last-seen timestamp |
+| `POST` | `/lease/renew` | Renew a node's lease |
 | `GET` | `/requests/traces` | Recent request history with timing |
+| `GET` | `/requests/trace/{id}` | Single request trace |
+| `POST` | `/requests/start` | Record request start |
+| `POST` | `/requests/update` | Update request status |
 
-## Deployment
-
-### Option 1 — Dev/Demo on EC2 (3 instances, ~$10–30/month)
-
-Deploys the true split inference architecture: Node A + Tracker on one machine, Node B on a second, frontend on a third.
-
-**Prerequisites:** AWS CLI configured, Terraform ≥ 1.5, an EC2 key pair.
-
-```bash
-cd deploy-ec2
-
-# 1. Create the 3 EC2 instances
-terraform init
-terraform apply \
-  -var="key_pair_name=<your-key-pair-name>" \
-  -var="your_ip_cidr=$(curl -s https://checkip.amazonaws.com)/32"
-
-# 2. Wait ~90 seconds for instances to boot, then deploy
-./deploy.sh ~/.ssh/<your-key-pair-name>.pem
-```
-
-The deploy script will output:
-```
-Frontend  : http://<frontend-ip>
-Generate  : http://<head-ip>:8001/generate
-Tracker   : http://<head-ip>:8003/assignment
-```
-
-**Tear down:**
-```bash
-terraform destroy \
-  -var="key_pair_name=<your-key-pair-name>" \
-  -var="your_ip_cidr=$(curl -s https://checkip.amazonaws.com)/32"
-```
-
-**Instance breakdown:**
-
-| Instance | Type | Services |
-|----------|------|----------|
-| `luminx-head` | t3.small | Node A (port 8001) + Tracker (port 8003) |
-| `luminx-tail` | t3.small | Node B (port 8002) |
-| `luminx-frontend` | t3.micro | nginx + React frontend (port 80) |
-
-### Option 2 — Production on AWS Fargate
-
-Full production setup with VPC, ECS Fargate, ALB, ECR, and CloudWatch. See `terraform/` for details.
-
-```bash
-cd terraform
-terraform init
-terraform apply
-```
-
-> Requires an S3 bucket + DynamoDB table for remote state — uncomment the backend block in `terraform/main.tf` first.
-
-**Cost:** ~$75–90/month running 24/7.
-
-## Architecture: 3-Instance Split
+## Architecture Diagram
 
 ```
-Instance 1 — luminx-head
-  ├── Node A  :8001  (GPT-2 layers 0 → split_layer)
-  └── Tracker :8003  (dynamic split assignment)
-          │
-          │ hidden states over HTTP
-          ▼
-Instance 2 — luminx-tail
-  └── Node B  :8002  (GPT-2 layers split_layer → 12)
-
-Instance 3 — luminx-frontend
-  └── nginx   :80   (React dashboard)
+                                   ┌───────────────────┐
+                                   │  Tracker :8003     │
+                                   │  VRAM split        │
+                                   │  Heartbeat / trace │
+                                   └─────────┬──────────┘
+         heartbeat ▲               ▲ heartbeat│ heartbeat ▲
+                   │               │          │           │
+┌──────────────────┴──┐  /forward_mid  ┌──────┴──────────┐  /forward_tail  ┌──────────────────┐
+│  Node A  :8001 (Head)│ ─────────────▶│ Node B :8002 (Mid)│ ──────────────▶│ Node C :8004 (Tail)│
+│  layers 0–8          │               │  layers 9–18      │                │  layers 19–27      │
+│  tokenize + embed    │               │  relay node       │                │  ln_f + lm_head    │
+└──────────────────────┘               └───────────────────┘                └──────────┬─────────┘
+        ▲  POST /generate                                                               │ next token
+        │                                                                               │
+   Client / Browser ◀──────────────────────────────────────────────────────────────────┘
+        ▲
+   React Frontend :80 (nginx reverse-proxy)
 ```
 
 ## Model Notes
 
-- Default: `sshleifer/tiny-gpt2` — 2 layers, ~50MB. Pipeline validation only, output is not meaningful.
-- Recommended for demos: `gpt2` — 12 layers, ~500MB, coherent English output.
-- Change via `MODEL_NAME` env var in `docker-compose.head.yml` and `docker-compose.tail.yml`.
+- **Cloud demo:** `Qwen/Qwen2.5-1.5B-Instruct` — 28 layers, 1.5B params, coherent output. Split 9/10/9 by default.
+- **Local smoke-test:** `sshleifer/tiny-gpt2` — 2 layers, ~50 MB, validates the pipeline only.
+- Change via `MODEL_NAME` env var. The `model_adapter` auto-detects architecture from the model config.
+- Supported: **Qwen2 / Qwen2-MoE**, **GPT-2 family**, **Phi-3 / Phi-4 Mini**.
 
 ## Frontend
 
-React dashboard with four pages:
+React dashboard (Vite) with five pages:
 
 | Page | Description |
 |------|-------------|
 | Chat | Type a prompt and generate text via the live API |
-| Health | Node A/B status, model name, layer count |
-| Cluster | Live node list — role, VRAM, status, last heartbeat |
-| Trace | Request history with duration and assigned nodes |
+| Health | Node A/B/C + Tracker status, model name, layer counts |
+| Cluster | Live node table — CPU%, RAM, VRAM, latency, active connections, sharing topology; summary cards for total/active/inactive nodes |
+| Trace | Request history with per-request duration and assigned nodes |
+| Logs | Client-side activity log (polling events, API errors); persisted to `localStorage` (max 150 entries, UUID fallback for non-HTTPS); refreshes every 2 s |
 
-Built with Vite + React. Configure `VITE_API_BASE_URL` to point to the head instance.
+The nginx reverse-proxy (`lumina-frontend-main/nginx.conf`) proxies `/generate` to Node A (300 s timeout for CPU inference) and `/nodes/`, `/assignments/`, `/requests/` to the Tracker, so the frontend needs only one origin.
+
+Configure:
+- `VITE_API_BASE_URL` — points to Node A (port 8001)
+- `VITE_TRACKER_BASE_URL` — points to the Tracker (port 8003)
