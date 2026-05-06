@@ -14,10 +14,10 @@ services:
     platform: linux/arm64
     command: uvicorn tracker:app --host 0.0.0.0 --port 8003
     environment:
-      - SPLIT_LAYER=10
-      - SPLIT_LAYER_A=10
-      - SPLIT_LAYER_B=21
-      - HEARTBEAT_TIMEOUT_SEC=30
+      - SPLIT_LAYER=9
+      - SPLIT_LAYER_A=9
+      - SPLIT_LAYER_B=19
+      - HEARTBEAT_TIMEOUT_SEC=120
     ports:
       - '8003:8003'
     networks:
@@ -35,16 +35,22 @@ services:
       dockerfile: docker/Dockerfile
     platform: linux/arm64
     command: uvicorn node_a:app --host 0.0.0.0 --port 8001
+    mem_limit: 15g
+    memswap_limit: 16g
     environment:
-      - MODEL_NAME=microsoft/Phi-4-mini-instruct
-      - SPLIT_LAYER_A=10
-      - SPLIT_LAYER_B=21
-      - SPLIT_LAYER=10
-      - NODE_B_URL=${NODE_B_URL:-http://localhost:8002}
+      - MODEL_NAME=Qwen/Qwen2.5-1.5B-Instruct
+      - SPLIT_LAYER_A=9
+      - SPLIT_LAYER_B=19
+      - SPLIT_LAYER=9
+      - NODE_B_URL=http://host.docker.internal:8002
       - NODE_C_URL=${NODE_C_URL:-http://localhost:8004}
       - TRACKER_URL=http://tracker:8003
       - ENABLE_DYNAMIC_SPLIT=true
       - NODE_A_ID=node-a
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - HF_HUB_DISABLE_XET=1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - '8001:8001'
     networks:
@@ -57,7 +63,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 120s  # model download on first run takes time
+      start_period: 600s  # full model load into RAM+swap takes time
+
+  frontend:
+    image: nginx:alpine
+    ports:
+      - '80:80'
+    volumes:
+      - ./lumina-frontend-main/dist:/usr/share/nginx/html:ro
+      - ./lumina-frontend-main/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - node-a
+      - tracker
+    networks:
+      - lumina
 
 networks:
   lumina:

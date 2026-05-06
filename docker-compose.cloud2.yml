@@ -12,14 +12,18 @@ services:
       dockerfile: docker/Dockerfile
     platform: linux/arm64
     command: uvicorn node_c:app --host 0.0.0.0 --port 8004
+    mem_limit: 15g
+    memswap_limit: 16g
     environment:
-      - MODEL_NAME=microsoft/Phi-4-mini-instruct
-      - SPLIT_LAYER_A=10
-      - SPLIT_LAYER_B=21
-      - SPLIT_LAYER=10
+      - MODEL_NAME=Qwen/Qwen2.5-1.5B-Instruct
+      - SPLIT_LAYER_A=9
+      - SPLIT_LAYER_B=19
+      - SPLIT_LAYER=9
       - TRACKER_URL=${TRACKER_URL:-http://localhost:8003}
       - ENABLE_DYNAMIC_SPLIT=true
       - NODE_C_ID=node-c
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - HF_HUB_DISABLE_XET=1
     ports:
       - '8004:8004'
     networks:
@@ -29,7 +33,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 120s
+      start_period: 600s
 
 networks:
   lumina:
