@@ -10,14 +10,14 @@ from lumina_sprint1.schemas import (
     NodeListResponse,
     NodeRegisterRequest,
     RequestStartRequest,
+    RequestTrace,
     RequestTraceResponse,
     RequestTracesResponse,
-    RequestTrace,
     RequestUpdateRequest,
 )
 from lumina_sprint1.tracker_core import AssignmentManager
 
-app = FastAPI(title='Lumina Sprint1 Tracker')
+app = FastAPI(title='Lumina Tracker')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=['*'],
@@ -26,23 +26,34 @@ app.add_middleware(
 )
 
 manager = AssignmentManager(
-    total_layers=4,
-    fallback_split_layer=settings.split_layer,
+    total_layers=32,  # Phi-4 Mini has 32 transformer layers
+    fallback_split_layer=settings.split_layer_a,
+    fallback_split_layer_b=settings.split_layer_b,
     heartbeat_timeout_sec=settings.heartbeat_timeout_sec,
 )
 
 
+def _make_assignment_response(split_a: int, split_b: int, total: int, version: int) -> AssignmentResponse:
+    return AssignmentResponse(
+        split_layer=split_a,        # backward compat field
+        split_layer_a=split_a,
+        split_layer_b=split_b,
+        total_layers=total,
+        version=version,
+    )
+
+
 @app.post('/register', response_model=AssignmentResponse)
 def register(request: NodeRegisterRequest) -> AssignmentResponse:
-    split_layer = manager.upsert_node(
+    manager.upsert_node(
         node_id=request.node_id,
         role=request.role,
         vram_gb=request.vram_gb,
         max_layers=request.max_layers,
         total_layers=request.total_layers,
     )
-    split, total, version = manager.assignment()
-    return AssignmentResponse(split_layer=split_layer or split, total_layers=total, version=version)
+    split_a, split_b, total, version = manager.assignment()
+    return _make_assignment_response(split_a, split_b, total, version)
 
 
 @app.post('/heartbeat', response_model=AssignmentResponse)
@@ -50,14 +61,14 @@ def heartbeat(request: NodeHeartbeatRequest) -> AssignmentResponse:
     if request.node_id not in manager.nodes:
         raise HTTPException(status_code=404, detail=f'Unknown node_id: {request.node_id}')
     manager.heartbeat(request.node_id)
-    split, total, version = manager.assignment()
-    return AssignmentResponse(split_layer=split, total_layers=total, version=version)
+    split_a, split_b, total, version = manager.assignment()
+    return _make_assignment_response(split_a, split_b, total, version)
 
 
 @app.get('/assignment', response_model=AssignmentResponse)
 def get_assignment() -> AssignmentResponse:
-    split, total, version = manager.assignment()
-    return AssignmentResponse(split_layer=split, total_layers=total, version=version)
+    split_a, split_b, total, version = manager.assignment()
+    return _make_assignment_response(split_a, split_b, total, version)
 
 
 @app.get('/nodes/list', response_model=NodeListResponse)
@@ -74,10 +85,9 @@ def get_current_assignments() -> AssignmentsResponse:
 def lease_renewal(request: NodeHeartbeatRequest) -> AssignmentResponse:
     if request.node_id not in manager.nodes:
         raise HTTPException(status_code=404, detail=f'Unknown node_id: {request.node_id}')
-
     manager.lease_renewal(request.node_id)
-    split, total, version = manager.assignment()
-    return AssignmentResponse(split_layer=split, total_layers=total, version=version)
+    split_a, split_b, total, version = manager.assignment()
+    return _make_assignment_response(split_a, split_b, total, version)
 
 
 @app.post('/requests/start', response_model=dict)
