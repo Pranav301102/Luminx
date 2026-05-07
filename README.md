@@ -5,9 +5,10 @@ Lumina runs a large language model across three physically separate machines by 
 ## How It Works
 
 ```
-Client
-  │
-  ▼ POST /generate
+              Client
+                │
+                ▼
+         POST /generate
 ┌──────────────────────────────┐
 │  Node A — Head  (port 8001)  │  layers  0 →  8  (tokenize + embed)
 └──────────────┬───────────────┘
@@ -46,7 +47,7 @@ Default cloud split: **9 / 10 / 9** across 28 layers (Qwen2.5-1.5B-Instruct).
 Each node loads **only the layers it will execute** — unused weights are never materialized. On CPU, `model_adapter._load_slice_cpu` builds a full model skeleton on PyTorch's `meta` device (zero RAM), then reads only the needed tensors directly from HuggingFace safetensors shards via `safe_open`, inserting them in-place with `load_state_dict(assign=True)`.
 
 ```
-Node A loads:  embed_tokens + layers  0– 8               (~⅓ model)
+Node A loads:  embed_tokens + layers  0– 8                (~⅓ model)
 Node B loads:  layers  9–18                               (~⅓ model)
 Node C loads:  layers 19–27 + final norm + lm_head        (~⅓ model)
 ```
@@ -203,23 +204,25 @@ All settings are read from environment variables or a `.env` file:
 ## Architecture Diagram
 
 ```
-                                   ┌───────────────────┐
-                                   │  Tracker :8003     │
-                                   │  VRAM split        │
-                                   │  Heartbeat / trace │
-                                   └─────────┬──────────┘
-         heartbeat ▲               ▲ heartbeat│ heartbeat ▲
+                                   ┌─────────────────────┐
+                                   │  Tracker :8003      │
+                                   │  VRAM split         │
+                                   │  Heartbeat / trace  │
+              heartbeat            └──────────┬──────────┘
+                   ▲               ▲ heartbeat│ heartbeat ▲
                    │               │          │           │
-┌──────────────────┴──┐  /forward_mid  ┌──────┴──────────┐  /forward_tail  ┌──────────────────┐
+┌────────────────┴────┐  /forward_mid  ┌──────┴──────────── /forward_tail    ┌──────────────────┐
 │  Node A  :8001 (Head)│ ─────────────▶│ Node B :8002 (Mid)│ ──────────────▶│ Node C :8004 (Tail)│
 │  layers 0–8          │               │  layers 9–18      │                │  layers 19–27      │
 │  tokenize + embed    │               │  relay node       │                │  ln_f + lm_head    │
 └──────────────────────┘               └───────────────────┘                └──────────┬─────────┘
         ▲  POST /generate                                                               │ next token
         │                                                                               │
-   Client / Browser ◀──────────────────────────────────────────────────────────────────┘
+   Client / Browser ◀───────────────────────────────────────────────────────────────────┘
         ▲
    React Frontend :80 (nginx reverse-proxy)
+
+
 ```
 
 ## Model Notes
