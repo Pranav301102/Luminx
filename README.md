@@ -209,13 +209,13 @@ All settings are read from environment variables or a `.env` file:
                                    │  VRAM split         │
                                    │  Heartbeat / trace  │
               heartbeat            └──────────┬──────────┘
-                   ▲               ▲ heartbeat│ heartbeat ▲
-                   │               │          │           │
+                 ▲                 ▲ heartbeat│ heartbeat ▲
+                 │                 │          │           │
 ┌────────────────┴────┐  /forward_mid  ┌──────┴──────────── /forward_tail    ┌──────────────────┐
 │  Node A  :8001 (Head)│ ─────────────▶│ Node B :8002 (Mid)│ ──────────────▶│ Node C :8004 (Tail)│
 │  layers 0–8          │               │  layers 9–18      │                │  layers 19–27      │
 │  tokenize + embed    │               │  relay node       │                │  ln_f + lm_head    │
-└──────────────────────┘               └───────────────────┘                └──────────┬─────────┘
+└──────────────────────┘               └───────────────────┘                └───────────┬────────┘
         ▲  POST /generate                                                               │ next token
         │                                                                               │
    Client / Browser ◀───────────────────────────────────────────────────────────────────┘
