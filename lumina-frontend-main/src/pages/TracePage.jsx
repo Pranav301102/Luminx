@@ -1,3 +1,4 @@
+// Trace Page
 import { useState } from "react";
 import { fetchRequestTrace } from "../api/requestsApi";
 import ErrorBanner from "../components/common/ErrorBanner";
