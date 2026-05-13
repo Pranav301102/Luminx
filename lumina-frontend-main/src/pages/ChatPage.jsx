@@ -1,3 +1,4 @@
+// Chat Page
 // Import React state hook for managing form input, response text, loading state, and errors
 import { useState } from "react";
 // Import API helper functions for normal and streaming text generation requests
