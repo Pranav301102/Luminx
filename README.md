@@ -44,7 +44,7 @@ Default cloud split: **9 / 10 / 9** across 28 layers (Qwen2.5-1.5B-Instruct).
 
 ### Memory-Aware Model Loading
 
-Each node loads **only the layers it will execute** — unused weights are never materialized. On CPU, `model_adapter._load_slice_cpu` builds a full model skeleton on PyTorch's `meta` device (zero RAM), then reads only the needed tensors directly from HuggingFace safetensors shards via `safe_open`, inserting them in-place with `load_state_dict(assign=True)`.
+Each node loads only the layers it is responsible for executing—unused weights are never materialized. On CPU, model_adapter._load_slice_cpu first constructs a full model skeleton on PyTorch’s meta device (consuming no real memory), then selectively reads only the required tensors from Hugging Face safetensors shards using safe_open, inserting them in place via load_state_dict(assign=True).
 
 ```
 Node A loads:  embed_tokens + layers  0– 8                (~⅓ model)
@@ -58,8 +58,7 @@ On CUDA, the standard `device_map='auto'` path is used.
 
 ### Background Heartbeat
 
-Each node starts a **daemon thread on startup** that sends a heartbeat to the Tracker every **20 seconds**, independent of inference traffic. This ensures the Tracker's liveness registry stays current even during idle periods.
-
+Each node starts a daemon thread on startup that sends a heartbeat to the Tracker every 20 seconds, independent of inference traffic. This keeps the Tracker’s liveness registry current even when nodes are idle.
 ## Project Layout
 
 ```
