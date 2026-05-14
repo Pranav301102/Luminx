@@ -1,6 +1,6 @@
 # Lumina — Distributed Split Inference
 
-Lumina runs a large language model across three physically separate machines by splitting its transformer layers between them. A **Tracker** service dynamically recalculates the optimal split boundaries at runtime based on each node's available VRAM, distributing the assignment via a versioned REST API.
+Lumina deploys a large language model across three physically distinct machines by partitioning its transformer layers among them. A centralized Tracker service dynamically determines optimal partition boundaries at runtime, taking into account the available VRAM on each node. These assignments are disseminated through a versioned REST API, ensuring consistent and adaptive distribution of computational workloads across the system.
 
 ## How It Works
 
